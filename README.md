@@ -199,7 +199,98 @@ floating-point rounding creeps into totals.
 
 ---
 
-## 5. Security notes
+## 5. Migrating to a dedicated Supabase project
+
+> **Why?** Pomelo Shop must **not** share a Supabase project with another app
+> (e.g. open-play). Both apps create `public.profiles`, both install an
+> `on_auth_user_created` trigger, and open-play adds a unique index on
+> `lower(email)`. Sharing one project makes the two schemas collide: pomelo's
+> `create table if not exists public.profiles` is silently skipped, so
+> `role = 'owner'` fails open-play's `CHECK` constraint, and the second account
+> with the same email is rejected by the unique index. **Use a separate project.**
+>
+> **If you already ran `0001` + `0002` in the shared project**, clean them up
+> first with [`supabase/cleanup/rollback_pomelo_from_shared.sql`](supabase/cleanup/rollback_pomelo_from_shared.sql).
+> That script drops the pomelo-only tables/bucket/functions and **restores
+> open-play's shadow-aware `handle_new_user()`**, which pomelo's `0002` had
+> overwritten (both apps use the same `on_auth_user_created` trigger name).
+
+The same email address can be reused freely across two *different* projects —
+there is no cross-project conflict. No data migration is needed if pomelo has
+no production orders yet.
+
+### Step 1 — Create the new project
+
+1. Go to <https://supabase.com/dashboard> → **New project**.
+2. Name it e.g. `pomelo-shop`, pick a region close to your users (e.g.
+   `Southeast Asia (Singapore)`), set a database password and create it.
+3. Wait for provisioning to finish (~2 min).
+
+### Step 2 — Copy the new credentials
+
+**Project → Settings → API**:
+
+| Value | Copy from |
+| --- | --- |
+| Project URL | *Project URL* |
+| anon key | *Project API keys → anon public* |
+| service_role key | *Project API keys → service_role* (click *Reveal*) |
+
+### Step 3 — Update local `.env.local`
+
+Replace the three Supabase values (keep `PROMPTPAY_ID` / `SHOP_NAME`):
+
+```bash
+SUPABASE_URL=https://<new-ref>.supabase.co
+SUPABASE_ANON_KEY=<new-anon-key>
+SUPABASE_SERVICE_ROLE_KEY=<new-service-role-key>
+```
+
+### Step 4 — Apply the migrations
+
+In the **new** project → **SQL Editor**, run the migrations **in order**:
+
+1. [`supabase/migrations/0001_pomelo_orders.sql`](supabase/migrations/0001_pomelo_orders.sql)
+2. [`supabase/migrations/0002_pomelo_rbac.sql`](supabase/migrations/0002_pomelo_rbac.sql)
+
+Both are idempotent (`create table if not exists`, `drop policy if exists`), so
+re-running them is safe.
+
+### Step 5 — Create the owner account
+
+1. **Authentication → Users → Add user** → enter the owner email + password →
+   tick **Auto Confirm User**.
+2. The `on_auth_user_created` trigger inserts a matching `public.profiles` row
+   with `role = 'user'`.
+3. Promote it in the SQL Editor:
+
+   ```sql
+   update public.profiles
+   set role = 'owner'
+   where email = 'owner@example.com';
+   ```
+
+4. Sign in at `/login.html` → you land on `/admin.html` with full permissions.
+
+### Step 6 — Update Vercel
+
+**Vercel → Project → Settings → Environment Variables** → set the same three
+Supabase values (mark `SUPABASE_SERVICE_ROLE_KEY` as **Sensitive**) → **Redeploy**.
+
+### Step 7 — Verify
+
+- `GET /api/config` returns the new `supabaseUrl` and a populated `catalogue`.
+- `/login.html` signs in and `/admin.html` shows the owner's tabs.
+- A test order inserts into the new project's `pomelo_orders`.
+
+> **Optional:** if you want to carry over existing test orders, export them from
+> the old project (Table Editor → `pomelo_orders` → **Export CSV**) and import
+> into the new one. Slips live in the old `pomelo-slips` bucket and would need
+> re-uploading; for test data it is usually simpler to start clean.
+
+---
+
+## 6. Security notes
 
 - Buyers can **insert** orders but cannot **read** them back — the order id is
   not treated as a secret, so a `SELECT` policy would leak every buyer's phone
