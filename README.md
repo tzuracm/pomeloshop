@@ -28,8 +28,8 @@ Buyer's phone                          Supabase
 6. Submit order  ───────┴──►  table: pomelo_orders (status = 'pending')
 ```
 
-The seller reviews orders in the Supabase dashboard (or any admin UI built on
-top of it) and flips `status` to `paid` / `delivered`.
+The seller reviews orders in the built-in staff console at `/admin.html` (or in
+the Supabase dashboard) and flips `status` to `paid` / `delivered`.
 
 ---
 
@@ -37,11 +37,12 @@ top of it) and flips `status` to `paid` / `delivered`.
 
 ### 2.1 Create the Supabase schema
 
-Open your Supabase project → **SQL Editor** → paste the contents of
-[`supabase/migrations/0001_pomelo_orders.sql`](supabase/migrations/0001_pomelo_orders.sql)
-→ **Run**.
+Open your Supabase project → **SQL Editor** → run the migrations **in order**:
 
-This creates:
+1. [`supabase/migrations/0001_pomelo_orders.sql`](supabase/migrations/0001_pomelo_orders.sql)
+2. [`supabase/migrations/0002_pomelo_rbac.sql`](supabase/migrations/0002_pomelo_rbac.sql)
+
+Migration `0001` creates:
 
 | Object | Purpose |
 | --- | --- |
@@ -49,25 +50,66 @@ This creates:
 | `storage.buckets['pomelo-slips']` | Public bucket for transfer slips |
 | Storage RLS policies | anon may upload; public may read |
 
+Migration `0002` adds the three-tier RBAC layer:
+
+| Object | Purpose |
+| --- | --- |
+| `public.profiles` | Staff profiles extending `auth.users` (role: user/admin/owner) |
+| `public.pomelo_settings` | PromptPay ID + bank info (public read, owner write) |
+| `public.pomelo_catalogue` | Products (public read, admin/owner write) |
+| `public.pomelo_page_content` | Editable storefront text (public read, owner write) |
+| `public.is_owner()` etc. | `SECURITY DEFINER` role helpers (avoid RLS recursion) |
+| `orders_staff_read` / `orders_staff_update` | Staff may read/update orders |
+
 ### 2.2 Configure environment variables
 
 ```bash
-cp .env.example .env
+cp .env.example .env.local
 ```
 
-Fill in `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `PROMPTPAY_ID`.
+Fill in:
+
+| Variable | Where to find it | Exposed to browser? |
+| --- | --- | --- |
+| `SUPABASE_URL` | Settings → API → Project URL | yes (public) |
+| `SUPABASE_ANON_KEY` | Settings → API → anon public | yes (public) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Settings → API → service_role | **NO — server only** |
+| `PROMPTPAY_ID` | your PromptPay account | yes (needed for the QR) |
+| `SHOP_NAME` | your shop name | yes |
 
 > The anon key is safe in the browser — it is protected by the RLS policies.
-> **Never** put the `service_role` key in this project.
+> The **`service_role` key bypasses RLS** and is used only by `/api/admin/*`.
+> Never expose it to the browser and never commit it. In Vercel, mark it as a
+> *Sensitive* environment variable.
 
-### 2.3 Run locally
+### 2.3 Create the first owner
+
+1. Sign up (or create a user) with the owner's email — either through
+   `/login.html` or **Supabase → Authentication → Users → Add user**.
+2. Promote that account to `owner` in the SQL Editor:
+
+   ```sql
+   update public.profiles
+   set role = 'owner'
+   where email = 'owner@example.com';
+   ```
+
+3. Sign in at `/login.html` → you land on `/admin.html` with full permissions.
+   From the **员工与权限** tab the owner can grant `admin` / `user` roles.
+
+### 2.4 Run locally
 
 ```bash
 npm install
-npm run dev        # vercel dev → http://localhost:3000
+npm run dev        # npx serve . -l 3001 → http://localhost:3001
 ```
 
-### 2.4 Deploy to Vercel
+> `npx serve` is a plain static file server: it does **not** execute the
+> `/api/*` serverless functions, so `/api/config` returns 404 locally and the
+> page shows its "not configured" fallback. To exercise the API + admin console
+> locally, use `vercel dev` (requires `vercel login`) or deploy to Vercel.
+
+### 2.5 Deploy to Vercel
 
 ```bash
 npm run deploy
@@ -82,20 +124,45 @@ Then add the same environment variables in
 
 ```
 pomelo-shop/
-├── index.html                 # Markup for the whole shop
+├── index.html                 # Buyer-facing shop
+├── login.html                 # Staff sign-in (email + password)
+├── admin.html                 # Staff console (role-gated tabs)
+├── admin.js                   # Admin console client logic
 ├── styles.css                 # All CSS
-├── app.js                     # All client logic (cart, QR, upload, submit)
+├── app.js                     # Storefront logic (cart, QR, upload, submit)
 ├── promptpay.js               # Vendored PromptPay payload builder (window.generatePayload)
 ├── config.js                  # Fetches /api/config → window.POMELO_CONFIG
 ├── api/
-│   └── config.js              # Vercel function: serves runtime env to the page
+│   ├── config.js              # Public runtime config + catalogue + page text
+│   └── admin/
+│       ├── _auth.js           # Shared role check (service_role, server-only)
+│       ├── me.js              # GET caller identity + role
+│       ├── orders.js          # GET list / PATCH update orders
+│       ├── catalogue.js       # CRUD products (admin+)
+│       ├── content.js         # Page text (owner)
+│       ├── settings.js        # PromptPay/bank settings (read: all, write: owner)
+│       └── users.js           # Staff roles (owner)
 ├── supabase/
 │   └── migrations/
-│       └── 0001_pomelo_orders.sql
+│       ├── 0001_pomelo_orders.sql
+│       └── 0002_pomelo_rbac.sql
+├── plans/
+│   └── rbac-design.md         # RBAC design notes
 ├── vercel.json
 ├── package.json
 └── .env.example
 ```
+
+### Roles
+
+| Role | Orders | Catalogue | Page text | Settings | Staff |
+| --- | --- | --- | --- | --- | --- |
+| `user` | view + status/note | — | — | view | — |
+| `admin` | full edit | full edit | — | view | — |
+| `owner` | full edit | full edit | edit | **edit** | manage roles |
+
+Tab visibility in `admin.html` is UX only — every `/api/admin/*` call re-checks
+the caller's role server-side with the `service_role` key.
 
 > **Note on `promptpay.js`:** the `promptpay-qr` npm package is CommonJS-only
 > and has no browser bundle on any CDN. Rather than add a bundler, the ~60-line
@@ -114,20 +181,21 @@ out of the repo while still allowing a fully static front end.
 
 ---
 
-## 4. Customising the catalogue
+## 4. Customising the catalogue & page text
 
-Edit the `CATALOGUE` array at the top of the `<script>` block in
-[`index.html`](index.html):
+The live catalogue and page text are stored in Supabase and served through
+[`api/config.js`](api/config.js), so the owner can edit them in `/admin.html`
+**without a redeploy**:
 
-```js
-const CATALOGUE = [
-  { sku: '5kg',  label: '5 kg 装',  unitPrice: 180, unit: 'THB' },
-  { sku: '10kg', label: '10 kg 装', unitPrice: 330, unit: 'THB' },
-];
-```
+- **Catalogue** → the **商品** tab (admin/owner). Rows live in
+  `pomelo_catalogue`; `unit_price` is in **THB**.
+- **Page text** → the **页面文字** tab (owner). Keys `hero_title` /
+  `hero_subtitle` live in `pomelo_page_content`.
 
-`unitPrice` is in **THB**. Internally everything is converted to satang
-(×100) before being stored, so no floating-point rounding creeps into totals.
+[`app.js`](app.js) keeps a built-in `DEFAULT_CATALOGUE` fallback, used only when
+the Supabase read fails (e.g. before migration `0002` is applied). Internally
+all money is converted to satang (×100) before being stored, so no
+floating-point rounding creeps into totals.
 
 ---
 
@@ -135,7 +203,12 @@ const CATALOGUE = [
 
 - Buyers can **insert** orders but cannot **read** them back — the order id is
   not treated as a secret, so a `SELECT` policy would leak every buyer's phone
-  number and slip.
+  number and slip. Staff read orders through `/api/admin/orders`.
+- The `service_role` key is used **only** inside `/api/admin/*`. It is never
+  sent to the browser. Every admin endpoint verifies the caller's Supabase
+  access token and re-loads their role from `profiles` before acting.
+- `pomelo_settings` (PromptPay ID, bank info) is **public-read** because the
+  storefront must build the QR client-side; only the **owner** may write it.
 - The `pomelo-slips` bucket is public-read so the seller can open slip URLs
   directly. If you want slips private, flip the bucket to private and serve
   them through signed URLs from an admin function.

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#f7b500" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Pomelo Shop · 管理后台</title>
+
+<!--
+  ============================================================================
+  Pomelo Shop — staff admin console
+  ============================================================================
+  Tabs are shown/hidden by role, but the REAL gate is server-side: every
+  /api/admin/* call re-checks the caller's role. Hiding a tab is UX only.
+
+    user  : Orders (status/note only)
+    admin : + Catalogue
+    owner : + Page text, Settings (write), Staff & roles
+  ============================================================================
+-->
+
+<link rel="stylesheet" href="/styles.css" />
+<style>
+  body { max-width: 960px; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 18px 0 10px; flex-wrap: wrap;
+  }
+  .topbar h1 { margin: 0; font-size: 20px; }
+  .who { font-size: 13px; color: var(--ink-soft); }
+  .who .role-badge {
+    display: inline-block; margin-left: 6px; padding: 2px 8px;
+    border-radius: 999px; font-size: 11px; font-weight: 700;
+    background: var(--brand-bg); color: var(--brand-ink);
+  }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 16px; }
+  .tab {
+    padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px;
+    background: #fff; font-size: 13px; font-weight: 600; color: var(--ink-soft);
+    cursor: pointer; font-family: var(--font);
+  }
+  .tab.active { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); }
+  tr:last-child td { border-bottom: 0; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .muted { color: var(--ink-soft); }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .pill.pending   { background: #fff6dd; color: #7a5200; }
+  .pill.paid      { background: #e8f7ee; color: #1f9d55; }
+  .pill.delivered { background: #e6f0ff; color: #1d4ed8; }
+  .pill.cancelled { background: #fdecea; color: #c0392b; }
+
+  select, input[type="text"], input[type="number"], textarea {
+    padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+    font-size: 13px; font-family: var(--font); background: #fff; color: var(--ink);
+  }
+  textarea { width: 100%; min-height: 60px; resize: vertical; }
+  .btn {
+    padding: 7px 12px; border: 0; border-radius: var(--radius-sm);
+    background: var(--brand); color: var(--brand-ink); font-weight: 700;
+    font-size: 13px; font-family: var(--font); cursor: pointer;
+  }
+  .btn.secondary { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+  .btn.danger { background: var(--err-bg); color: var(--err); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px; }
+  .form-grid label { display: block; font-size: 12px; color: var(--ink-soft); margin-bottom: 4px; }
+  .form-grid input, .form-grid select { width: 100%; }
+  .readonly-note { font-size: 12px; color: var(--ink-soft); margin: 0 0 10px; }
+  .empty { padding: 24px; text-align: center; color: var(--ink-soft); font-size: 14px; }
+  .slip-link { color: var(--brand-ink); text-decoration: underline; }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <h1>🍊 Pomelo 管理后台</h1>
+    <div class="who">
+      <span id="whoEmail">…</span>
+      <span class="role-badge" id="whoRole">…</span>
+      <button class="btn secondary" id="signOutBtn" style="margin-left:8px;">退出</button>
+    </div>
+  </div>
+
+  <div id="adminAlert" class="alert error"></div>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="orders">订单</button>
+    <button class="tab" data-tab="catalogue" data-min="admin">商品</button>
+    <button class="tab" data-tab="content" data-min="owner">页面文字</button>
+    <button class="tab" data-tab="settings" data-min="user">敏感设置</button>
+    <button class="tab" data-tab="users" data-min="owner">员工与权限</button>
+  </nav>
+
+  <!-- ===================== Orders ===================== -->
+  <section class="panel active" id="panel-orders">
+    <div class="card">
+      <h2>订单列表</h2>
+      <div class="form-grid">
+        <div>
+          <label for="orderStatusFilter">按状态筛选</label>
+          <select id="orderStatusFilter">
+            <option value="">全部</option>
+            <option value="pending">pending</option>
+            <option value="paid">paid</option>
+            <option value="delivered">delivered</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+        </div>
+        <div style="align-self:end;">
+          <button class="btn secondary" id="refreshOrders">刷新</button>
+        </div>
+      </div>
+      <div id="ordersBody"><div class="empty">加载中…</div></div>
+    </div>
+  </section>
+
+  <!-- ===================== Catalogue ===================== -->
+  <section class="panel" id="panel-catalogue">
+    <div class="card">
+      <h2>商品管理</h2>
+      <div class="form-grid">
+        <div><label for="catSku">SKU</label><input type="text" id="catSku" placeholder="5kg" /></div>
+        <div><label for="catLabel">名称</label><input type="text" id="catLabel" placeholder="5 kg 装" /></div>
+        <div><label for="catPrice">单价 (THB)</label><input type="number" id="catPrice" min="0" step="1" placeholder="180" /></div>
+        <div><label for="catSort">排序</label><input type="number" id="catSort" step="1" placeholder="1" /></div>
+        <div style="align-self:end;"><button class="btn" id="catSave">保存商品</button></div>
+      </div>
+      <div id="catalogueBody"><div class="empty">加载中…</div></div>
+    </div>
+  </section>
+
+  <!-- ===================== Page content ===================== -->
+  <section class="panel" id="panel-content">
+    <div class="card">
+      <h2>页面文字（仅 owner 可改）</h2>
+      <div id="contentBody"><div class="empty">加载中…</div></div>
+      <div style="margin-top:12px;">
+        <button class="btn" id="contentSave">保存全部</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== Settings ===================== -->
+  <section class="panel" id="panel-settings">
+    <div class="card">
+      <h2>敏感设置</h2>
+      <p class="readonly-note" id="settingsNote"></p>
+      <div id="settingsBody"><div class="empty">加载中…</div></div>
+      <div style="margin-top:12px;">
+        <button class="btn" id="settingsSave">保存设置</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== Users ===================== -->
+  <section class="panel" id="panel-users">
+    <div class="card">
+      <h2>员工与权限（仅 owner）</h2>
+      <div id="usersBody"><div class="empty">加载中…</div></div>
+    </div>
+  </section>
+
+  <script src="/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="/admin.js"></script>
+</body>
+</html>

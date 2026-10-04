@@ -13,14 +13,20 @@
   "use strict";
 
   // ---------------------------------------------------------------------
-  // 0. Catalogue — edit this to change products / prices.
+  // 0. Catalogue — DEFAULT fallback only.
+  //    The live catalogue is loaded from /api/config (backed by the
+  //    pomelo_catalogue table) so the owner can edit products in /admin.html
+  //    without a redeploy. If that read fails, we keep this built-in list.
   //    unitPrice is in THB. Internally we convert to satang (x100) so no
   //    floating-point rounding creeps into the stored total.
   // ---------------------------------------------------------------------
-  var CATALOGUE = [
+  var DEFAULT_CATALOGUE = [
     { sku: "5kg",  label: "5 kg 装",  unitPrice: 180 },
     { sku: "10kg", label: "10 kg 装", unitPrice: 330 }
   ];
+
+  // Mutable working copy — replaced by the live catalogue once config loads.
+  var CATALOGUE = DEFAULT_CATALOGUE.slice();
 
   var STORAGE_KEY = "pomelo_shop_buyer_v1";
   var BUCKET = "pomelo-slips";
@@ -34,6 +40,7 @@
 
   var el = {
     shopName:    $("shopName"),
+    shopSubtitle: $("shopSubtitle"),
     footerShop:  $("footerShop"),
     configAlert: $("configAlert"),
     formAlert:   $("formAlert"),
@@ -69,7 +76,11 @@
     lastQrPayload: null
   };
 
-  CATALOGUE.forEach(function (item) { state.qty[item.sku] = 0; });
+  function resetQty() {
+    state.qty = {};
+    CATALOGUE.forEach(function (item) { state.qty[item.sku] = 0; });
+  }
+  resetQty();
 
   // ---------------------------------------------------------------------
   // 3. Helpers
@@ -464,6 +475,19 @@
     el.submitBtn.addEventListener("click", submitOrder);
   }
 
+  // Apply owner-editable page text. Keys are seeded by the RBAC migration
+  // (hero_title / hero_subtitle) and edited in /admin.html.
+  function applyContent(content) {
+    if (content.hero_title && el.shopName) {
+      el.shopName.textContent = content.hero_title;
+      el.footerShop.textContent = content.hero_title;
+      document.title = content.hero_title + " · 柚子下单";
+    }
+    if (content.hero_subtitle && el.shopSubtitle) {
+      el.shopSubtitle.textContent = content.hero_subtitle;
+    }
+  }
+
   function applyConfig(cfg) {
     state.config = cfg;
 
@@ -475,6 +499,24 @@
 
     if (cfg.promptPayId) {
       el.ppId.textContent = "PromptPay: " + cfg.promptPayId;
+    }
+
+    // Swap in the live catalogue when the server returned one.
+    if (Array.isArray(cfg.catalogue) && cfg.catalogue.length) {
+      CATALOGUE = cfg.catalogue.map(function (it) {
+        return {
+          sku: it.sku,
+          label: it.label,
+          unitPrice: Number(it.unitPrice) || 0
+        };
+      });
+      resetQty();
+      renderCatalogue();
+    }
+
+    // Apply owner-editable page text (hero title / subtitle).
+    if (cfg.content && typeof cfg.content === "object") {
+      applyContent(cfg.content);
     }
 
     var missing = cfg.missing || [];

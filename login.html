@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#f7b500" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Pomelo Shop · 员工登录</title>
+
+<!--
+  ============================================================================
+  Pomelo Shop — staff sign-in (email + password via Supabase Auth)
+  ============================================================================
+  On success the session is stored by supabase-js (localStorage) and the user
+  is redirected to /admin.html. The role is NOT decided here — every
+  /api/admin/* call re-checks it server-side.
+  ============================================================================
+-->
+
+<link rel="stylesheet" href="/styles.css" />
+<style>
+  body { max-width: 420px; }
+  .login-card { margin-top: 40px; }
+  .login-card .field { margin-bottom: 14px; }
+  .login-card input {
+    width: 100%;
+    padding: 11px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    font-size: 15px;
+    font-family: var(--font);
+    background: #fff;
+    color: var(--ink);
+  }
+  .login-card input:focus {
+    outline: 2px solid var(--brand);
+    outline-offset: 1px;
+    border-color: var(--brand);
+  }
+  .login-card button {
+    width: 100%;
+    padding: 12px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--brand);
+    color: var(--brand-ink);
+    font-size: 15px;
+    font-weight: 700;
+    font-family: var(--font);
+    cursor: pointer;
+  }
+  .login-card button:disabled { opacity: .6; cursor: not-allowed; }
+  .back-link {
+    display: block;
+    text-align: center;
+    margin-top: 18px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    text-decoration: none;
+  }
+  .back-link:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+  <header class="hero">
+    <div class="emoji">🍊</div>
+    <h1>员工登录</h1>
+    <p>Pomelo Shop 管理后台</p>
+  </header>
+
+  <div id="loginAlert" class="alert error"></div>
+
+  <main class="card login-card">
+    <form id="loginForm" autocomplete="on">
+      <div class="field">
+        <label for="email">邮箱</label>
+        <input type="email" id="email" name="email" autocomplete="username"
+               placeholder="you@example.com" required />
+      </div>
+
+      <div class="field">
+        <label for="password">密码</label>
+        <input type="password" id="password" name="password"
+               autocomplete="current-password" placeholder="••••••••" required />
+      </div>
+
+      <button type="submit" id="loginBtn">
+        <span id="loginLabel">登录</span>
+      </button>
+    </form>
+
+    <a class="back-link" href="/">← 返回商店</a>
+  </main>
+
+  <!-- Runtime config (Supabase URL + anon key) -->
+  <script src="/config.js"></script>
+  <!-- Supabase JS (UMD) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+
+  <script>
+  (function () {
+    "use strict";
+
+    var el = {
+      form:  document.getElementById("loginForm"),
+      email: document.getElementById("email"),
+      pass:  document.getElementById("password"),
+      btn:   document.getElementById("loginBtn"),
+      label: document.getElementById("loginLabel"),
+      alert: document.getElementById("loginAlert")
+    };
+
+    function showAlert(kind, html) {
+      el.alert.className = "alert " + kind + " show";
+      el.alert.innerHTML = html;
+    }
+    function hideAlert() {
+      el.alert.className = "alert";
+      el.alert.innerHTML = "";
+    }
+    function setBusy(on) {
+      el.btn.disabled = on;
+      el.label.textContent = on ? "登录中…" : "登录";
+    }
+
+    function boot() {
+      var ready = window.__pomeloConfigReady || Promise.resolve(window.POMELO_CONFIG || {});
+      ready.then(function (cfg) {
+        if (!cfg || !cfg.supabaseUrl || !cfg.supabaseAnonKey) {
+          showAlert("error", "系统尚未配置完成，请联系管理员。");
+          el.btn.disabled = true;
+          return;
+        }
+
+        var client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+
+        // If already signed in, go straight to the admin page.
+        client.auth.getSession().then(function (res) {
+          if (res && res.data && res.data.session) {
+            window.location.replace("/admin.html");
+          }
+        });
+
+        el.form.addEventListener("submit", function (ev) {
+          ev.preventDefault();
+          hideAlert();
+
+          var email = el.email.value.trim();
+          var password = el.pass.value;
+          if (!email || !password) {
+            showAlert("error", "请输入邮箱和密码。");
+            return;
+          }
+
+          setBusy(true);
+          client.auth.signInWithPassword({ email: email, password: password })
+            .then(function (res) {
+              if (res.error) {
+                setBusy(false);
+                showAlert("error", "登录失败：" + res.error.message);
+                return;
+              }
+              window.location.replace("/admin.html");
+            })
+            .catch(function (err) {
+              setBusy(false);
+              showAlert("error", "登录出错：" + (err && err.message ? err.message : String(err)));
+            });
+        });
+      });
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", boot);
+    } else {
+      boot();
+    }
+  })();
+  </script>
+</body>
+</html>
