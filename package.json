@@ -1,0 +1,21 @@
+{
+  "name": "pomelo-shop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lightweight no-registration pomelo ordering page with PromptPay QR + Supabase slip upload.",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod",
+    "build": "echo \"Static site — no build step required\" && exit 0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4"
+  },
+  "devDependencies": {
+    "vercel": "^37.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

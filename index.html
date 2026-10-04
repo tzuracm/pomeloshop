@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#f7b500" />
+<title>Pomelo Shop · 柚子下单</title>
+<meta name="description" content="泰国柚子在线下单 · PromptPay 扫码支付 · 无需注册" />
+
+<!--
+  ============================================================================
+  Pomelo Shop — single-file storefront
+  ============================================================================
+  All CSS lives in styles.css, all logic in app.js. Both are plain static
+  assets served by Vercel; no build step is required.
+  ============================================================================
+-->
+
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+  <!-- ===================== Header ===================== -->
+  <header class="hero">
+    <div class="emoji">🍊</div>
+    <h1 id="shopName">Pomelo Shop</h1>
+    <p>泰国金柚 · 扫码下单 · 无需注册</p>
+  </header>
+
+  <!-- ===================== Global alerts ===================== -->
+  <div id="configAlert" class="alert error"></div>
+  <div id="formAlert" class="alert error"></div>
+
+  <!-- ===================== Order form ===================== -->
+  <main id="orderFlow">
+
+    <!-- Step 1 — contact -->
+    <section class="card">
+      <h2><span class="step">1</span> 联系方式</h2>
+
+      <div class="field">
+        <label for="wechatName">微信名 / 称呼</label>
+        <input
+          type="text"
+          id="wechatName"
+          name="wechatName"
+          autocomplete="nickname"
+          placeholder="例如：小明"
+          maxlength="40"
+          required />
+      </div>
+
+      <div class="field">
+        <label for="phone">联系电话 <span class="hint">（用于配送联系）</span></label>
+        <input
+          type="tel"
+          id="phone"
+          name="phone"
+          autocomplete="tel"
+          inputmode="tel"
+          placeholder="例如：0812345678"
+          maxlength="20"
+          required />
+      </div>
+    </section>
+
+    <!-- Step 2 — fulfilment -->
+    <section class="card">
+      <h2><span class="step">2</span> 履约方式</h2>
+      <div class="segmented">
+        <input type="radio" name="fulfilment" id="fSelf" value="self_pickup" checked />
+        <label for="fSelf">
+          自提
+          <small>Self-Pickup</small>
+        </label>
+
+        <input type="radio" name="fulfilment" id="fGrab" value="grab_cod" />
+        <label for="fGrab">
+          Grab 到付
+          <small>Delivery on Delivery</small>
+        </label>
+      </div>
+    </section>
+
+    <!-- Step 3 — catalogue -->
+    <section class="card">
+      <h2><span class="step">3</span> 选择规格</h2>
+      <div id="catalogue"></div>
+
+      <div class="total-bar">
+        <span class="label">合计</span>
+        <span class="amount"><span class="cur">฿</span><span id="totalAmount">0</span></span>
+      </div>
+    </section>
+
+    <!-- Step 4 — PromptPay QR -->
+    <section class="card">
+      <h2><span class="step">4</span> 扫码支付</h2>
+      <div class="qr-wrap">
+        <div class="qr-frame" id="qrFrame">
+          <div class="placeholder">选择规格后<br />自动生成支付二维码</div>
+        </div>
+        <div class="qr-amount" id="qrAmount"></div>
+        <p class="qr-hint">
+          使用手机银行 App 扫码，或截图后在 App 中识别<br />
+          支付完成后请上传转账凭证
+        </p>
+        <span class="pp-id" id="ppId"></span>
+      </div>
+    </section>
+
+    <!-- Step 5 — slip upload + submit -->
+    <section class="card">
+      <h2><span class="step">5</span> 上传转账凭证</h2>
+
+      <label class="dropzone" id="dropzone" for="slipInput">
+        <span class="icon">📎</span>
+        <span class="title">点击上传或拖拽图片到此处</span>
+        <span class="sub">支持 JPG / PNG / WEBP，最大 8 MB</span>
+        <input type="file" id="slipInput" accept="image/*" />
+      </label>
+
+      <div class="slip-preview" id="slipPreview">
+        <img id="slipImg" alt="转账凭证预览" />
+        <button type="button" class="remove" id="removeSlip" aria-label="移除图片">✕</button>
+      </div>
+
+      <div style="height:16px"></div>
+
+      <button type="button" class="btn" id="submitBtn" disabled>
+        <span id="submitLabel">提交订单</span>
+      </button>
+    </section>
+
+  </main>
+
+  <!-- ===================== Success screen ===================== -->
+  <section class="success-screen" id="successScreen">
+    <div class="tick">✓</div>
+    <h2>下单成功！</h2>
+    <p>我们已收到你的订单与转账凭证。</p>
+    <p>确认收款后会尽快安排发货 / 自提通知。</p>
+    <div class="ref" id="orderRef"></div>
+  </section>
+
+  <footer>
+    <div id="footerShop">Pomelo Shop</div>
+    <div>支付由 PromptPay 提供 · 数据存储于 Supabase</div>
+  </footer>
+
+  <!-- ===================== Libraries ===================== -->
+  <!--
+    promptpay.js     : vendored EMVCo PromptPay payload builder (window.generatePayload)
+    qrcode-generator : UMD QR encoder (window.qrcode), zero dependencies
+    supabase-js      : storage upload + table insert
+  -->
+  <script src="/promptpay.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+
+  <!-- Runtime config loader (fetches /api/config) -->
+  <script src="/config.js"></script>
+
+  <!-- Application logic -->
+  <script src="/app.js"></script>
+</body>
+</html>
