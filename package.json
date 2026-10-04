@@ -5,7 +5,7 @@
   "description": "Lightweight no-registration pomelo ordering page with PromptPay QR + Supabase slip upload.",
   "type": "module",
   "scripts": {
-    "dev": "vercel dev",
+    "dev": "npx serve . -l 3001",
     "deploy": "vercel --prod",
     "build": "echo \"Static site — no build step required\" && exit 0"
   },

@@ -388,6 +388,12 @@
         if (!slipUrl) throw new Error("无法获取凭证链接，请重试。");
 
         // --- 9c. insert the order row ---
+        // NOTE: deliberately NO `.select()` here. The anon role has an INSERT
+        // policy but no SELECT policy (see 0001_pomelo_orders.sql), so asking
+        // PostgREST to return the inserted row would fail RLS and surface as a
+        // spurious "提交订单失败" even though the row was written. We already
+        // generated `orderId` client-side and used it as the storage folder, so
+        // it is a valid reference to show the buyer.
         return state.supabase.from(TABLE).insert({
           wechat_name: wechatName,
           phone: phone,
@@ -396,11 +402,11 @@
           total_satang: satang,
           slip_url: slipUrl,
           status: "pending"
-        }).select("id").single();
+        });
       })
       .then(function (ins) {
         if (ins.error) throw new Error("提交订单失败：" + ins.error.message);
-        onSuccess(ins.data && ins.data.id ? ins.data.id : orderId);
+        onSuccess(orderId);
       })
       .catch(function (err) {
         console.error("[pomelo] submit failed:", err);
