@@ -15,10 +15,13 @@
  *
  *   PUT  — confirm a decoded payload and make it the storefront's payment QR
  *          Body: { payload: "<EMVCo TLV string>" }
- *          Stores it as the `promptpay_qr_payload` setting (owner only).
+ *          Stores it as the `promptpay_qr_payload` setting (admin/owner).
  *
- *   DELETE — clear the confirmed payload (owner only). The storefront then
+ *   DELETE — clear the confirmed payload (admin/owner). The storefront then
  *            reports that payment is not configured and blocks checkout.
+ *
+ * Role model: payment configuration is an operational duty, so `admin` and
+ * `owner` both have full control. `user` has no access at all.
  *
  * Why decode server-side?
  * -----------------------
@@ -201,10 +204,9 @@ function decodePayload(payload) {
 /**
  * GET — read the currently confirmed payload.
  *
- * Admins may inspect it (they can decode uploads but cannot change the active
- * account); owners may also confirm or clear it. A malformed legacy row is
- * returned with `decoded: null` rather than failing the whole request, so the
- * owner can still see that something is stored and replace it.
+ * Admins and owners may inspect it. A malformed legacy row is returned with
+ * `decoded: null` rather than failing the whole request, so staff can still see
+ * that something is stored and replace it.
  */
 async function getQr(req, res) {
   const { admin } = await requireRole(req, "admin");
@@ -257,7 +259,7 @@ async function decodeQr(req, res) {
 
 /** PUT — confirm a decoded payload as the storefront's payment QR. */
 async function confirmQr(req, res) {
-  const { user, admin } = await requireRole(req, "owner");
+  const { user, admin } = await requireRole(req, "admin");
   const body = readBody(req);
 
   const payload = String(body.payload || "").trim();
@@ -284,7 +286,7 @@ async function confirmQr(req, res) {
 
 /** DELETE — remove the confirmed payload (payment becomes unavailable). */
 async function clearQr(req, res) {
-  const { admin } = await requireRole(req, "owner");
+  const { admin } = await requireRole(req, "admin");
   const { error } = await admin
     .from("pomelo_settings")
     .delete()

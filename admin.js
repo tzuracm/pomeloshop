@@ -187,11 +187,11 @@
       activateTab("orders");
     }
 
-    // Payment QR: everyone admin+ may decode, but only the owner may confirm
-    // or clear the active payload. The server enforces this too.
-    var isOwner = state.role === "owner";
-    if (el.qrConfirmBtn) el.qrConfirmBtn.style.display = isOwner ? "" : "none";
-    if (el.qrClearBtn) el.qrClearBtn.style.display = isOwner ? "" : "none";
+    // Payment QR: admin+ has full control (decode, confirm, clear). The server
+    // enforces the same minimum role.
+    var canManageQr = have >= ROLE_RANK.admin;
+    if (el.qrConfirmBtn) el.qrConfirmBtn.style.display = canManageQr ? "" : "none";
+    if (el.qrClearBtn) el.qrClearBtn.style.display = canManageQr ? "" : "none";
 
     // Catalogue form: admin+ only (tab is hidden otherwise, but guard anyway).
     var catForm = el.panelCatalogue.querySelector(".form-grid");
@@ -834,9 +834,9 @@
   /** Render the currently confirmed payload (or a "not set" notice). */
   function renderCurrentPaymentQr() {
     var payload = state.settings.promptpay_qr_payload || "";
-    var isOwner = state.role === "owner";
+    var canManageQr = (ROLE_RANK[state.role] || 0) >= ROLE_RANK.admin;
 
-    el.qrClearBtn.style.display = isOwner && payload ? "" : "none";
+    el.qrClearBtn.style.display = canManageQr && payload ? "" : "none";
 
     if (!payload) {
       el.qrCurrent.innerHTML =
@@ -1018,11 +1018,11 @@
 
     el.qrDecoded.hidden = false;
 
-    var isOwner = state.role === "owner";
+    var canManageQr = (ROLE_RANK[state.role] || 0) >= ROLE_RANK.admin;
     el.qrConfirmBar.hidden = false;
-    el.qrConfirmBtn.style.display = isOwner ? "" : "none";
-    if (!isOwner) {
-      showAlert("error", "解码成功。只有所有者可以确认并启用收款二维码。");
+    el.qrConfirmBtn.style.display = canManageQr ? "" : "none";
+    if (!canManageQr) {
+      showAlert("error", "解码成功。只有管理员或所有者可以确认并启用收款二维码。");
     }
   }
 

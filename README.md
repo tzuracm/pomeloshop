@@ -46,6 +46,7 @@ Open your Supabase project → **SQL Editor** → run the migrations **in order*
 5. [`supabase/migrations/0005_pomelo_security_hardening.sql`](supabase/migrations/0005_pomelo_security_hardening.sql)
 6. [`supabase/migrations/0006_pomelo_forced_password_change.sql`](supabase/migrations/0006_pomelo_forced_password_change.sql)
 7. [`supabase/migrations/0007_pomelo_payment_qr_only.sql`](supabase/migrations/0007_pomelo_payment_qr_only.sql)
+8. [`supabase/migrations/0008_pomelo_settings_admin_write.sql`](supabase/migrations/0008_pomelo_settings_admin_write.sql)
 
 Migration `0001` creates:
 
@@ -67,7 +68,9 @@ Migration `0002` adds the three-tier RBAC layer:
 | `orders_staff_read` / `orders_staff_update` | Staff may read/update orders |
 
 Migration `0007` removes the legacy `promptpay_id` and unused `bank_*` rows and
-narrows anonymous reads to `promptpay_qr_payload` only. See
+narrows anonymous reads to `promptpay_qr_payload` only. Migration `0008` widens
+write access to that table from owner-only to `admin` + `owner`, so payment
+configuration is an operational duty rather than an ownership decision. See
 [`plans/payment-settings-consolidation.md`](plans/payment-settings-consolidation.md).
 
 ### 2.2 Configure environment variables
@@ -163,7 +166,8 @@ pomelo-shop/
 │       ├── 0004_pomelo_delivery_methods.sql
 │       ├── 0005_pomelo_security_hardening.sql
 │       ├── 0006_pomelo_forced_password_change.sql
-│       └── 0007_pomelo_payment_qr_only.sql
+│       ├── 0007_pomelo_payment_qr_only.sql
+│       └── 0008_pomelo_settings_admin_write.sql
 ├── plans/
 │   ├── rbac-design.md         # RBAC design notes
 │   └── payment-settings-consolidation.md
@@ -177,8 +181,8 @@ pomelo-shop/
 | Role | Orders | Catalogue | Page text | Payment QR | Staff |
 | --- | --- | --- | --- | --- | --- |
 | `user` | view + status/note | — | — | — | — |
-| `admin` | full edit | full edit | — | view + decode | — |
-| `owner` | full edit | full edit | edit | **confirm / clear** | manage roles |
+| `admin` | full edit | full edit | — | **full control** | — |
+| `owner` | full edit | full edit | edit | **full control** | manage roles |
 
 Tab visibility in `admin.html` is UX only — every `/api/admin/*` call re-checks
 the caller's role server-side with the `service_role` key.
@@ -273,6 +277,7 @@ In the **new** project → **SQL Editor**, run the migrations **in order**:
 5. [`supabase/migrations/0005_pomelo_security_hardening.sql`](supabase/migrations/0005_pomelo_security_hardening.sql)
 6. [`supabase/migrations/0006_pomelo_forced_password_change.sql`](supabase/migrations/0006_pomelo_forced_password_change.sql)
 7. [`supabase/migrations/0007_pomelo_payment_qr_only.sql`](supabase/migrations/0007_pomelo_payment_qr_only.sql)
+8. [`supabase/migrations/0008_pomelo_settings_admin_write.sql`](supabase/migrations/0008_pomelo_settings_admin_write.sql)
 
 All are idempotent (`create table if not exists`, `drop policy if exists`), so
 re-running them is safe.

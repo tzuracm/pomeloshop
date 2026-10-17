@@ -21,7 +21,7 @@ Authentication: **Email + password via Supabase Auth** (no email infrastructure)
 Admin UI: **new static pages** (`login.html`, `admin.html`) calling **Vercel
 serverless functions** that use the `service_role` key.
 Payment configuration: the confirmed QR payload in the **`pomelo_settings`
-table**, owner-only write. There is no manual PromptPay ID and no bank-detail
+table**, admin/owner write. There is no manual PromptPay ID and no bank-detail
 settings — see [`payment-settings-consolidation.md`](payment-settings-consolidation.md).
 First owner: **SQL seed** in the migration (fixed email), password set later.
 
@@ -49,8 +49,8 @@ Staff ──► login.html ──► Supabase Auth (email + password)
       └─► admin.html ──► /api/admin/* (Vercel fns, service_role, role-checked)
                           ├─ list/update orders
                           ├─ manage catalogue
-                          ├─ manage roles        (owner only)
-                          └─ manage payment QR   (decode: admin+, confirm: owner)
+                          ├─ manage payment QR   (decode, confirm, clear)
+                          └─ manage roles        (owner only)
 ```
 
 ---
@@ -97,9 +97,9 @@ create trigger on_auth_user_created
 
 ### 3.2 `public.pomelo_settings` (new)
 
-Holds sensitive settings. **Everyone may read** (the storefront needs the
-PromptPay ID to build the QR, and staff may view it); **only the owner may
-write**. Key/value so new settings need no migration.
+Holds the confirmed payment QR payload. **Anon may read only
+`promptpay_qr_payload`** (the storefront needs it to build the QR); **admin and
+owner may write**. Key/value so new settings need no migration.
 
 ```sql
 create table if not exists public.pomelo_settings (
@@ -234,11 +234,12 @@ The confirmed payload is **readable by everyone** (the buyer page builds the QR
 client-side) but **modifiable only by the owner**:
 
 - The **storefront** receives `promptPayQrPayload` from `/api/config` (public).
-- The **admin UI** shows the `收款二维码` tab to `admin+`; only the owner sees the
-  confirm and clear controls.
-- **`/api/admin/payment-qr`** allows `GET` and `POST` (decode) for `admin+`, and
-  `PUT` / `DELETE` for the owner only.
-- The **`pomelo_settings`** table is public-read (single key) / owner-write via RLS.
+- The **admin UI** shows the `收款二维码` tab to `admin+`, including the confirm
+  and clear controls.
+- **`/api/admin/payment-qr`** requires `admin` for all four methods
+  (`GET`, `POST`, `PUT`, `DELETE`).
+- The **`pomelo_settings`** table is anon-read (single key) / admin+owner-write
+  via RLS.
 
 ---
 
@@ -362,8 +363,9 @@ owner account. Documented in the README.
 | --- | --- |
 | Client tampering with role | Role re-checked server-side in every `/api/admin/*` call |
 | `service_role` key leak | Server-only env var; never referenced in client code or `/api/config` |
-| Admin **modifying** the payment QR | `pomelo_settings` RLS = owner-write; `/api/admin/payment-qr` PUT/DELETE = owner-only |
+| Admin **modifying** the payment QR | Allowed by design — payment config is an operational duty. `pomelo_settings` RLS = `is_admin_or_owner()`; `/api/admin/payment-qr` PUT/DELETE = `admin` |
 | Admin **reading** the payment QR | Allowed by design (the payload is public via the QR anyway) |
+| `user` **modifying** the payment QR | Blocked at all three layers: API `requireRole("admin")`, hidden UI controls, RLS `is_admin_or_owner()` |
 | Unvalidated QR payload | Only `/api/admin/payment-qr` PUT can write it, after EMVCo CRC + GUID validation |
 | User editing prices | `/api/admin/orders` PATCH whitelists `status`/`note` for `user` |
 | Anon reading orders | No anon SELECT policy on `pomelo_orders` (unchanged) |
@@ -376,7 +378,7 @@ owner account. Documented in the README.
 `supabase/migrations/0002_pomelo_rbac.sql`:
 
 1. `profiles` table + trigger + index
-2. `pomelo_settings` table + owner-only RLS + seed
+2. `pomelo_settings` table + admin/owner-write RLS + seed
 3. `pomelo_catalogue` table + public-read/staff-write RLS + seed
 4. `pomelo_page_content` table + public-read/owner-write RLS + seed
 5. `pomelo_orders` staff SELECT/UPDATE policies

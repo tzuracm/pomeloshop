@@ -1,5 +1,10 @@
 # Plan — Remove redundant 敏感设置 and make 收款二维码 the single payment source
 
+> **Update:** the payment QR is now manageable by `admin` as well as `owner`.
+> The original plan restricted confirm/clear to the owner; see
+> [`0008_pomelo_settings_admin_write.sql`](../supabase/migrations/0008_pomelo_settings_admin_write.sql).
+> Any "owner only" wording below is superseded.
+
 ## 1. Audit conclusion
 
 The reported overlap is confirmed:
@@ -16,16 +21,16 @@ Target state:
 - The `敏感设置` tab, its API endpoint, `promptpay_id`, and all bank fields are removed.
 - `promptpay_qr_payload` is the only payment configuration.
 - If no confirmed payload exists, the storefront clearly reports that payment is unavailable and blocks checkout.
-- Only the owner can confirm or clear the QR; admins may inspect the current confirmed QR; regular staff cannot change it.
+- Admins and owners can decode, confirm, and clear the QR; role `user` cannot.
 
 ## 2. Target flow
 
 ```mermaid
 flowchart TD
-    A[Owner uploads bank receive-money QR screenshot] --> B[Browser BarcodeDetector reads raw payload]
+    A[Admin or owner uploads bank receive-money QR screenshot] --> B[Browser BarcodeDetector reads raw payload]
     B --> C[POST /api/admin/payment-qr]
     C --> D[Server validates EMVCo TLV CRC and merchant GUID]
-    D --> E[Owner reviews decoded account]
+    D --> E[Admin or owner reviews decoded account]
     E --> F[PUT stores promptpay_qr_payload]
     F --> G[Buyer loads storefront]
     G --> H{Confirmed payload exists}

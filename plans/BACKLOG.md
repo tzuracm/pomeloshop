@@ -151,10 +151,16 @@ Last updated: 2026-10-17
       优先级：`P0` · 状态：`未开始`
 
 - [ ] **OPS-07** 执行 `0007_pomelo_payment_qr_only.sql`（删除 `promptpay_id` / `bank_*` 行，anon 仅可读 `promptpay_qr_payload`）。
-      **执行顺序**：先部署代码 → owner 在「收款二维码」确认二维码 → 前台验证支付二维码正确 → 再执行本迁移。
+      **执行顺序**：先部署代码 → admin/owner 在「收款二维码」确认二维码 → 前台验证支付二维码正确 → 再执行本迁移。
       否则仅配置过 `promptpay_id` 的店铺会失去收款配置。
       优先级：`P0` · 状态：`未开始`
       涉及：[`0007_pomelo_payment_qr_only.sql`](../supabase/migrations/0007_pomelo_payment_qr_only.sql:1)
+
+- [ ] **OPS-08** 执行 `0008_pomelo_settings_admin_write.sql`（`pomelo_settings` 写权限由 owner-only 放宽为 admin+owner）。
+      原因：收款二维码属于日常运营职责，不应只有 owner 能更换。
+      执行后确认末尾校验查询只返回 `settings_admin_write` 一条写策略。
+      优先级：`P0` · 状态：`未开始`
+      涉及：[`0008_pomelo_settings_admin_write.sql`](../supabase/migrations/0008_pomelo_settings_admin_write.sql:1)
 
 - [ ] **OPS-03** 在 Supabase Auth 设置中**关闭公开注册**（`Disable signup`），员工账号只能由 owner 在后台创建。
       优先级：`P0` · 状态：`未开始`
