@@ -956,6 +956,40 @@
     }
   }
 
+  /**
+   * Refresh the payment keys straight from Supabase.
+   *
+   * /api/config is a serverless function that may be cached by the CDN or a
+   * service worker. The owner can change the receiving account at any time, so
+   * we re-read the two payment keys directly from `pomelo_settings` (anon RLS
+   * allows exactly these two keys) and override the config. This guarantees the
+   * buyer always sees the account the owner most recently confirmed.
+   */
+  function refreshPaymentSettings() {
+    if (!state.supabase) return Promise.resolve();
+    return state.supabase
+      .from("pomelo_settings")
+      .select("key, value")
+      .in("key", ["promptpay_id", "promptpay_qr_payload"])
+      .then(function (res) {
+        if (res.error || !Array.isArray(res.data)) return;
+        var next = Object.assign({}, state.config || {});
+        for (var i = 0; i < res.data.length; i++) {
+          var row = res.data[i];
+          if (row.key === "promptpay_id") next.promptPayId = row.value || "";
+          if (row.key === "promptpay_qr_payload") next.promptPayQrPayload = row.value || "";
+        }
+        state.config = next;
+        // Force a re-render even if the payload string is unchanged.
+        state.lastQrPayload = null;
+        refreshTotals();
+      })
+      .catch(function (err) {
+        // Non-fatal: keep the config we already have.
+        console.warn("[pomelo] payment settings refresh failed:", err);
+      });
+  }
+
   function boot() {
     loadBuyer();
     renderCatalogue();
@@ -967,6 +1001,8 @@
     ready.then(function (cfg) {
       applyConfig(cfg || {});
       refreshTotals(); // re-render QR now that promptPayId is known
+      // Override with the freshest payment keys from Supabase.
+      return refreshPaymentSettings();
     });
   }
 

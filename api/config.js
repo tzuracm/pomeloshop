@@ -42,8 +42,11 @@ async function safeSelect(supabase, table, columns, order) {
 }
 
 export default async function handler(req, res) {
-  // Cache at the edge for 5 minutes; config rarely changes.
-  res.setHeader("Cache-Control", "public, max-age=0, s-maxage=300");
+  // Do NOT cache at the edge. The owner can change the payment QR at any time
+  // from /admin.html, and a cached response would keep serving the previous
+  // receiving account to buyers for the whole cache lifetime. The payload is
+  // small and the endpoint is cheap, so correctness wins over caching here.
+  res.setHeader("Cache-Control", "no-store, max-age=0");
 
   const supabaseUrl = process.env.SUPABASE_URL || "";
   const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "";
