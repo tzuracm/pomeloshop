@@ -29,14 +29,6 @@
     { key: "social_proof_viewers_max", label: "跑马灯 · 浏览人数上限（数字）" }
   ];
 
-  /** Settings keys shown in the settings panel. */
-  var SETTING_KEYS = [
-    { key: "promptpay_id", label: "PromptPay ID" },
-    { key: "bank_name", label: "银行名称" },
-    { key: "bank_account", label: "银行账号" },
-    { key: "bank_holder", label: "账户名" }
-  ];
-
   var state = {
     client: null,
     session: null,
@@ -195,15 +187,9 @@
       activateTab("orders");
     }
 
-    // Settings: read-only for non-owners.
-    var isOwner = state.role === "owner";
-    el.settingsSave.style.display = isOwner ? "" : "none";
-    el.settingsNote.textContent = isOwner
-      ? "这些设置对所有人可见，但只有所有者可以修改。"
-      : "这些设置对所有人可见，只有所有者可以修改（你当前为只读）。";
-
     // Payment QR: everyone admin+ may decode, but only the owner may confirm
     // or clear the active payload. The server enforces this too.
+    var isOwner = state.role === "owner";
     if (el.qrConfirmBtn) el.qrConfirmBtn.style.display = isOwner ? "" : "none";
     if (el.qrClearBtn) el.qrClearBtn.style.display = isOwner ? "" : "none";
 
@@ -231,7 +217,6 @@
     else if (name === "delivery") loadDeliveryMethods();
     else if (name === "payment") loadPaymentQr();
     else if (name === "content") loadContent();
-    else if (name === "settings") loadSettings();
     else if (name === "users") loadUsers();
   }
 
@@ -821,67 +806,10 @@
   }
 
   // --------------------------------------------------------------------------
-  // Settings (read: all, write: owner)
-  // --------------------------------------------------------------------------
-
-  function loadSettings() {
-    el.settingsBody.innerHTML = '<div class="empty">加载中…</div>';
-    api("/api/admin/settings")
-      .then(function (data) {
-        state.settings = {};
-        (data.settings || []).forEach(function (row) { state.settings[row.key] = row.value; });
-        renderSettings();
-      })
-      .catch(function (err) {
-        el.settingsBody.innerHTML = '<div class="empty">加载失败</div>';
-        fail(err);
-      });
-  }
-
-  function renderSettings() {
-    var isOwner = state.role === "owner";
-
-    var fields = SETTING_KEYS.map(function (s) {
-      var val = state.settings[s.key] != null ? state.settings[s.key] : "";
-      return (
-        '<div style="margin-bottom:12px;">' +
-          '<label for="setting-' + escapeHtml(s.key) + '">' + escapeHtml(s.label) +
-            ' <span class="muted mono">(' + escapeHtml(s.key) + ")</span></label>" +
-          '<input type="text" id="setting-' + escapeHtml(s.key) + '" data-key="' + escapeHtml(s.key) + '"' +
-            ' value="' + escapeHtml(val) + '"' + (isOwner ? "" : " readonly") + " />" +
-        "</div>"
-      );
-    }).join("");
-
-    el.settingsBody.innerHTML = fields;
-  }
-
-  function onSettingsSave() {
-    var inputs = el.settingsBody.querySelectorAll("input[data-key]");
-    var entries = {};
-    for (var i = 0; i < inputs.length; i++) {
-      entries[inputs[i].getAttribute("data-key")] = inputs[i].value;
-    }
-
-    el.settingsSave.disabled = true;
-    hideAlert();
-
-    api("/api/admin/settings", { method: "PUT", body: { entries: entries } })
-      .then(function () {
-        el.settingsSave.disabled = false;
-        showAlert("ok", "设置已保存。");
-      })
-      .catch(function (err) {
-        el.settingsSave.disabled = false;
-        fail(err);
-      });
-  }
-
-  // --------------------------------------------------------------------------
   // Payment QR (decode: admin+, confirm/clear: owner)
   // --------------------------------------------------------------------------
   //
-  // Flow:
+  // This is the ONLY payment configuration. Flow:
   //   1. admin picks a screenshot of the bank's receive-money QR
   //   2. we read the QR pixels in the browser (BarcodeDetector) and POST the
   //      raw payload to /api/admin/payment-qr for authoritative decoding
@@ -891,10 +819,10 @@
 
   function loadPaymentQr() {
     el.qrCurrent.innerHTML = '<div class="empty">加载中…</div>';
-    api("/api/admin/settings")
+    api("/api/admin/payment-qr")
       .then(function (data) {
         state.settings = {};
-        (data.settings || []).forEach(function (row) { state.settings[row.key] = row.value; });
+        if (data && data.payload) state.settings.promptpay_qr_payload = data.payload;
         renderCurrentPaymentQr();
       })
       .catch(function (err) {
@@ -914,7 +842,7 @@
       el.qrCurrent.innerHTML =
         '<h3>当前收款二维码</h3>' +
         '<p class="muted" style="margin:0;">尚未上传并确认收款二维码。' +
-          '买家目前使用「敏感设置」中的 PromptPay ID 生成二维码。</p>';
+          '买家目前<strong>无法下单支付</strong>，请上传并确认收款二维码。</p>';
       return;
     }
 
@@ -1131,7 +1059,7 @@
   }
 
   function onQrClear() {
-    if (!window.confirm("确定要清除已确认的收款二维码吗？清除后将回退到 PromptPay ID。")) return;
+    if (!window.confirm("确定要清除已确认的收款二维码吗？清除后买家将无法下单支付。")) return;
     el.qrClearBtn.disabled = true;
     hideAlert();
 
@@ -1140,7 +1068,7 @@
         el.qrClearBtn.disabled = false;
         delete state.settings.promptpay_qr_payload;
         renderCurrentPaymentQr();
-        showAlert("ok", "已清除收款二维码，买家将使用 PromptPay ID 生成二维码。");
+        showAlert("ok", "已清除收款二维码，买家暂时无法下单支付。");
       })
       .catch(function (err) {
         el.qrClearBtn.disabled = false;
@@ -1426,10 +1354,6 @@
     el.contentBody = $("contentBody");
     el.contentSave = $("contentSave");
 
-    el.settingsNote = $("settingsNote");
-    el.settingsBody = $("settingsBody");
-    el.settingsSave = $("settingsSave");
-
     el.usersBody = $("usersBody");
     el.newUserEmail = $("newUserEmail");
     el.newUserName = $("newUserName");
@@ -1476,7 +1400,6 @@
     el.catSave.addEventListener("click", onCatalogueSave);
     el.dmSave.addEventListener("click", onDeliverySave);
     el.contentSave.addEventListener("click", onContentSave);
-    el.settingsSave.addEventListener("click", onSettingsSave);
 
     el.qrFile.addEventListener("change", onQrFileChange);
     el.qrDecodeBtn.addEventListener("click", onQrDecode);

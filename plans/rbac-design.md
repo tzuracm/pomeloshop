@@ -13,14 +13,16 @@ Add a three-tier role system to Pomelo Shop, modelled on the RBAC patterns in
 
 | Role | Permissions |
 | --- | --- |
-| **owner** | Everything: edit page text + catalogue, manage orders, grant/revoke admin & user roles, **modify** sensitive settings (PromptPay ID, bank info) |
-| **admin** | Manage products & orders. **Cannot modify** sensitive/bank info (PromptPay ID, bank details) — but may **view** it |
+| **owner** | Everything: edit page text + catalogue, manage orders, grant/revoke admin & user roles, **confirm or clear** the payment QR |
+| **admin** | Manage products & orders. May **view and decode** the payment QR but **cannot confirm or clear** it |
 | **user** | View the order list, update fulfilment status (arrange shipping) |
 
 Authentication: **Email + password via Supabase Auth** (no email infrastructure).
 Admin UI: **new static pages** (`login.html`, `admin.html`) calling **Vercel
 serverless functions** that use the `service_role` key.
-Sensitive settings: stored in a **`pomelo_settings` table**, owner-only RLS.
+Payment configuration: the confirmed QR payload in the **`pomelo_settings`
+table**, owner-only write. There is no manual PromptPay ID and no bank-detail
+settings — see [`payment-settings-consolidation.md`](payment-settings-consolidation.md).
 First owner: **SQL seed** in the migration (fixed email), password set later.
 
 ---
@@ -30,25 +32,25 @@ First owner: **SQL seed** in the migration (fixed email), password set later.
 ### Today (no auth)
 ```
 Buyer ──► index.html ──► /api/config ──► { supabaseUrl, supabaseAnonKey,
-                                            promptPayId, shopName }
+                                            promptPayQrPayload, shopName }
                      └──► Supabase (anon key, INSERT-only on pomelo_orders)
 ```
 
 - No `auth.users`, no `profiles`, no login.
-- `PROMPTPAY_ID` comes from an env var and is served to **every** browser via
-  [`api/config.js`](../api/config.js:24) so the QR can be generated client-side.
+- The confirmed QR payload is served to **every** browser via
+  [`api/config.js`](../api/config.js:1) so the QR can be generated client-side.
 
 ### Target (with RBAC)
 ```
 Buyer ──► index.html ──► /api/config ──► { supabaseUrl, supabaseAnonKey,
-                                            promptPayId, shopName }   (unchanged)
+                                            promptPayQrPayload, shopName }
 
 Staff ──► login.html ──► Supabase Auth (email + password)
       └─► admin.html ──► /api/admin/* (Vercel fns, service_role, role-checked)
                           ├─ list/update orders
                           ├─ manage catalogue
                           ├─ manage roles        (owner only)
-                          └─ manage settings     (owner only)
+                          └─ manage payment QR   (decode: admin+, confirm: owner)
 ```
 
 ---
@@ -222,23 +224,21 @@ create policy "content_owner_write" on public.pomelo_page_content
 
 ---
 
-## 4. PromptPay ID visibility (clarified)
+## 4. Payment QR visibility (superseded)
 
-Per the owner's clarification: the PromptPay ID and similar settings are
-**readable by everyone** but **modifiable only by the owner**. This matches
-reality — the buyer page generates the QR client-side, so the ID is already
-public by necessity.
+> **Superseded.** The manual PromptPay ID and the `敏感设置` panel were removed;
+> the confirmed QR payload is now the only payment configuration. See
+> [`payment-settings-consolidation.md`](payment-settings-consolidation.md).
 
-Enforcement is therefore **write-only access control**:
+The confirmed payload is **readable by everyone** (the buyer page builds the QR
+client-side) but **modifiable only by the owner**:
 
-- The **storefront** receives `promptPayId` from `/api/config` (public) — unchanged.
-- The **admin UI** shows the settings panel to all staff as **read-only**, with
-  the edit controls enabled only for the owner.
-- The **`/api/admin/settings`** function allows `GET` for any staff role and
-  rejects `PUT` from non-owners.
-- The **`pomelo_settings`** table is public-read / owner-write via RLS.
-
-No server-side QR generation is needed, since the ID is not treated as a secret.
+- The **storefront** receives `promptPayQrPayload` from `/api/config` (public).
+- The **admin UI** shows the `收款二维码` tab to `admin+`; only the owner sees the
+  confirm and clear controls.
+- **`/api/admin/payment-qr`** allows `GET` and `POST` (decode) for `admin+`, and
+  `PUT` / `DELETE` for the owner only.
+- The **`pomelo_settings`** table is public-read (single key) / owner-write via RLS.
 
 ---
 
@@ -265,10 +265,13 @@ the browser).
 | `/api/admin/catalogue` | POST/PATCH/DELETE | admin | Manage products |
 | `/api/admin/content` | GET | user | Read page content |
 | `/api/admin/content` | PUT | owner | Edit page text |
-| `/api/admin/settings` | GET | user | Read PromptPay ID, bank info |
-| `/api/admin/settings` | PUT | owner | Modify PromptPay ID, bank info |
+| `/api/admin/payment-qr` | GET | admin | Read the confirmed payment QR |
+| `/api/admin/payment-qr` | POST | admin | Decode an uploaded QR (no write) |
+| `/api/admin/payment-qr` | PUT/DELETE | owner | Confirm / clear the payment QR |
 | `/api/admin/users` | GET | owner | List staff accounts |
 | `/api/admin/users` | POST/PATCH | owner | Grant/revoke admin & user roles |
+
+> `/api/admin/settings` was **removed** together with the `敏感设置` tab.
 
 ### Shared helper: `api/admin/_auth.js`
 
@@ -313,8 +316,9 @@ Single page, tabs shown/hidden by role:
 | --- | :---: | :---: | :---: |
 | Orders (list + status/note) | ✅ | ✅ | ✅ |
 | Catalogue | — | ✅ | ✅ |
+| Delivery methods | — | ✅ | ✅ |
+| Payment QR | — | 👁 view + decode | ✏️ confirm / clear |
 | Page text | — | — | ✅ |
-| Settings (PromptPay / bank) | 👁 read-only | 👁 read-only | ✏️ read + write |
 | Staff & roles | — | — | ✅ |
 
 - Reads the session from supabase-js, sends `Authorization: Bearer <access_token>`
@@ -328,7 +332,9 @@ Single page, tabs shown/hidden by role:
   array, falling back to the current array if the table is empty/unreachable.
 - Page text: fetch from `pomelo_page_content` (public read) and apply to the
   relevant elements.
-- PromptPay ID: unchanged (still from `/api/config`).
+- Payment QR: built from the confirmed `promptPayQrPayload` in `/api/config`.
+  When no payload is confirmed, the storefront reports that payment is
+  unavailable and blocks checkout.
 
 ---
 
@@ -356,8 +362,9 @@ owner account. Documented in the README.
 | --- | --- |
 | Client tampering with role | Role re-checked server-side in every `/api/admin/*` call |
 | `service_role` key leak | Server-only env var; never referenced in client code or `/api/config` |
-| Admin **modifying** bank info | `pomelo_settings` RLS = owner-write; `/api/admin/settings` PUT = owner-only |
-| Admin **reading** bank info | Allowed by design (the ID is public via the QR anyway) |
+| Admin **modifying** the payment QR | `pomelo_settings` RLS = owner-write; `/api/admin/payment-qr` PUT/DELETE = owner-only |
+| Admin **reading** the payment QR | Allowed by design (the payload is public via the QR anyway) |
+| Unvalidated QR payload | Only `/api/admin/payment-qr` PUT can write it, after EMVCo CRC + GUID validation |
 | User editing prices | `/api/admin/orders` PATCH whitelists `status`/`note` for `user` |
 | Anon reading orders | No anon SELECT policy on `pomelo_orders` (unchanged) |
 | Owner lockout | Owner role can only be changed by another owner; seed statement is idempotent |

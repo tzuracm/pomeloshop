@@ -42,6 +42,10 @@ Open your Supabase project → **SQL Editor** → run the migrations **in order*
 1. [`supabase/migrations/0001_pomelo_orders.sql`](supabase/migrations/0001_pomelo_orders.sql)
 2. [`supabase/migrations/0002_pomelo_rbac.sql`](supabase/migrations/0002_pomelo_rbac.sql)
 3. [`supabase/migrations/0003_pomelo_sku_codes.sql`](supabase/migrations/0003_pomelo_sku_codes.sql)
+4. [`supabase/migrations/0004_pomelo_delivery_methods.sql`](supabase/migrations/0004_pomelo_delivery_methods.sql)
+5. [`supabase/migrations/0005_pomelo_security_hardening.sql`](supabase/migrations/0005_pomelo_security_hardening.sql)
+6. [`supabase/migrations/0006_pomelo_forced_password_change.sql`](supabase/migrations/0006_pomelo_forced_password_change.sql)
+7. [`supabase/migrations/0007_pomelo_payment_qr_only.sql`](supabase/migrations/0007_pomelo_payment_qr_only.sql)
 
 Migration `0001` creates:
 
@@ -56,11 +60,15 @@ Migration `0002` adds the three-tier RBAC layer:
 | Object | Purpose |
 | --- | --- |
 | `public.profiles` | Staff profiles extending `auth.users` (role: user/admin/owner) |
-| `public.pomelo_settings` | PromptPay ID + bank info (public read, owner write) |
+| `public.pomelo_settings` | Confirmed payment QR payload (public read, owner write) |
 | `public.pomelo_catalogue` | Products (public read, admin/owner write) |
 | `public.pomelo_page_content` | Editable storefront text (public read, owner write) |
 | `public.is_owner()` etc. | `SECURITY DEFINER` role helpers (avoid RLS recursion) |
 | `orders_staff_read` / `orders_staff_update` | Staff may read/update orders |
+
+Migration `0007` removes the legacy `promptpay_id` and unused `bank_*` rows and
+narrows anonymous reads to `promptpay_qr_payload` only. See
+[`plans/payment-settings-consolidation.md`](plans/payment-settings-consolidation.md).
 
 ### 2.2 Configure environment variables
 
@@ -75,8 +83,13 @@ Fill in:
 | `SUPABASE_URL` | Settings → API → Project URL | yes (public) |
 | `SUPABASE_ANON_KEY` | Settings → API → anon public | yes (public) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Settings → API → service_role | **NO — server only** |
-| `PROMPTPAY_ID` | your PromptPay account | yes (needed for the QR) |
 | `SHOP_NAME` | your shop name | yes |
+
+> **Payment is configured in the admin console, not in the environment.** The
+> owner uploads the bank's receive-money QR in `/admin.html` → **收款二维码**;
+> the server validates the EMVCo payload and stores it as
+> `pomelo_settings.promptpay_qr_payload`. Until a QR is confirmed, the
+> storefront reports that payment is unavailable and blocks checkout.
 
 > The anon key is safe in the browser — it is protected by the RLS policies.
 > The **`service_role` key bypasses RLS** and is used only by `/api/admin/*`.
@@ -131,7 +144,6 @@ pomelo-shop/
 ├── admin.js                   # Admin console client logic
 ├── styles.css                 # All CSS
 ├── app.js                     # Storefront logic (cart, QR, upload, submit)
-├── promptpay.js               # Vendored PromptPay payload builder (window.generatePayload)
 ├── config.js                  # Fetches /api/config → window.POMELO_CONFIG
 ├── api/
 │   ├── config.js              # Public runtime config + catalogue + page text
@@ -141,15 +153,20 @@ pomelo-shop/
 │       ├── orders.js          # GET list / PATCH update orders
 │       ├── catalogue.js       # CRUD products (admin+)
 │       ├── content.js         # Page text (owner)
-│       ├── settings.js        # PromptPay/bank settings (read: all, write: owner)
+│       ├── payment-qr.js      # GET/POST/PUT/DELETE confirmed payment QR
 │       └── users.js           # Staff roles (owner)
 ├── supabase/
 │   └── migrations/
 │       ├── 0001_pomelo_orders.sql
 │       ├── 0002_pomelo_rbac.sql
-│       └── 0003_pomelo_sku_codes.sql
+│       ├── 0003_pomelo_sku_codes.sql
+│       ├── 0004_pomelo_delivery_methods.sql
+│       ├── 0005_pomelo_security_hardening.sql
+│       ├── 0006_pomelo_forced_password_change.sql
+│       └── 0007_pomelo_payment_qr_only.sql
 ├── plans/
-│   └── rbac-design.md         # RBAC design notes
+│   ├── rbac-design.md         # RBAC design notes
+│   └── payment-settings-consolidation.md
 ├── vercel.json
 ├── package.json
 └── .env.example
@@ -157,29 +174,22 @@ pomelo-shop/
 
 ### Roles
 
-| Role | Orders | Catalogue | Page text | Settings | Staff |
+| Role | Orders | Catalogue | Page text | Payment QR | Staff |
 | --- | --- | --- | --- | --- | --- |
-| `user` | view + status/note | — | — | view | — |
-| `admin` | full edit | full edit | — | view | — |
-| `owner` | full edit | full edit | edit | **edit** | manage roles |
+| `user` | view + status/note | — | — | — | — |
+| `admin` | full edit | full edit | — | view + decode | — |
+| `owner` | full edit | full edit | edit | **confirm / clear** | manage roles |
 
 Tab visibility in `admin.html` is UX only — every `/api/admin/*` call re-checks
 the caller's role server-side with the `service_role` key.
-
-> **Note on `promptpay.js`:** the `promptpay-qr` npm package is CommonJS-only
-> and has no browser bundle on any CDN. Rather than add a bundler, the ~60-line
-> algorithm (EMVCo TLV + CRC16-XMODEM) is vendored into
-> [`promptpay.js`](promptpay.js). Its output is byte-identical to
-> `promptpay-qr@0.5.0` — verified against the original across mobile-number,
-> national-ID and e-Wallet targets.
 
 ### Why `api/config.js`?
 
 Vercel serves static files as-is, so `index.html` cannot read `process.env`.
 The tiny serverless function at [`api/config.js`](api/config.js) returns the
-public config (Supabase URL, anon key, PromptPay ID, shop name) as JSON, and
-[`config.js`](config.js) fetches it before the page boots. This keeps secrets
-out of the repo while still allowing a fully static front end.
+public config (Supabase URL, anon key, confirmed payment QR payload, shop name)
+as JSON, and [`config.js`](config.js) fetches it before the page boots. This
+keeps secrets out of the repo while still allowing a fully static front end.
 
 ---
 
@@ -244,7 +254,7 @@ no production orders yet.
 
 ### Step 3 — Update local `.env.local`
 
-Replace the three Supabase values (keep `PROMPTPAY_ID` / `SHOP_NAME`):
+Replace the three Supabase values (keep `SHOP_NAME`):
 
 ```bash
 SUPABASE_URL=https://<new-ref>.supabase.co
@@ -259,8 +269,12 @@ In the **new** project → **SQL Editor**, run the migrations **in order**:
 1. [`supabase/migrations/0001_pomelo_orders.sql`](supabase/migrations/0001_pomelo_orders.sql)
 2. [`supabase/migrations/0002_pomelo_rbac.sql`](supabase/migrations/0002_pomelo_rbac.sql)
 3. [`supabase/migrations/0003_pomelo_sku_codes.sql`](supabase/migrations/0003_pomelo_sku_codes.sql)
+4. [`supabase/migrations/0004_pomelo_delivery_methods.sql`](supabase/migrations/0004_pomelo_delivery_methods.sql)
+5. [`supabase/migrations/0005_pomelo_security_hardening.sql`](supabase/migrations/0005_pomelo_security_hardening.sql)
+6. [`supabase/migrations/0006_pomelo_forced_password_change.sql`](supabase/migrations/0006_pomelo_forced_password_change.sql)
+7. [`supabase/migrations/0007_pomelo_payment_qr_only.sql`](supabase/migrations/0007_pomelo_payment_qr_only.sql)
 
-Both are idempotent (`create table if not exists`, `drop policy if exists`), so
+All are idempotent (`create table if not exists`, `drop policy if exists`), so
 re-running them is safe.
 
 ### Step 5 — Create the owner account
@@ -288,6 +302,7 @@ Supabase values (mark `SUPABASE_SERVICE_ROLE_KEY` as **Sensitive**) → **Redepl
 
 - `GET /api/config` returns the new `supabaseUrl` and a populated `catalogue`.
 - `/login.html` signs in and `/admin.html` shows the owner's tabs.
+- The owner confirms a payment QR in the **收款二维码** tab.
 - A test order inserts into the new project's `pomelo_orders`.
 
 > **Optional:** if you want to carry over existing test orders, export them from
@@ -305,8 +320,10 @@ Supabase values (mark `SUPABASE_SERVICE_ROLE_KEY` as **Sensitive**) → **Redepl
 - The `service_role` key is used **only** inside `/api/admin/*`. It is never
   sent to the browser. Every admin endpoint verifies the caller's Supabase
   access token and re-loads their role from `profiles` before acting.
-- `pomelo_settings` (PromptPay ID, bank info) is **public-read** because the
-  storefront must build the QR client-side; only the **owner** may write it.
+- `pomelo_settings` holds only the confirmed payment QR payload. Anonymous
+  clients may read that single key because the storefront must build the QR
+  client-side; only the **owner** may write it, and only through
+  `/api/admin/payment-qr` after EMVCo validation.
 - The `pomelo-slips` bucket is public-read so the seller can open slip URLs
   directly. If you want slips private, flip the bucket to private and serve
   them through signed URLs from an admin function.

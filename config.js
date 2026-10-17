@@ -13,13 +13,13 @@
 (function () {
   "use strict";
 
-  /** @type {{supabaseUrl:string,supabaseAnonKey:string,promptPayId:string,shopName:string,missing:string[]}} */
+  /** @type {{supabaseUrl:string,supabaseAnonKey:string,promptPayQrPayload:string,shopName:string,missing:string[]}} */
   var fallback = {
     supabaseUrl: "",
     supabaseAnonKey: "",
-    promptPayId: "",
+    promptPayQrPayload: "",
     shopName: "Pomelo Shop",
-    missing: ["SUPABASE_URL", "SUPABASE_ANON_KEY", "PROMPTPAY_ID"],
+    missing: ["SUPABASE_URL", "SUPABASE_ANON_KEY"],
   };
 
   window.POMELO_CONFIG = fallback;

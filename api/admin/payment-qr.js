@@ -1,30 +1,36 @@
 /**
  * Vercel serverless function: /api/admin/payment-qr
  *
+ * This endpoint is the ONLY payment configuration surface. There is no manual
+ * PromptPay ID and no bank-detail settings: the confirmed QR payload is the
+ * single source of truth for where buyers pay.
+ *
+ *   GET  — read the currently confirmed payload (admin/owner)
+ *          Returns { payload, decoded }. `payload` is "" when none is set.
+ *
  *   POST — decode an uploaded bank PromptPay QR image (admin/owner)
- *          Body: { image: "data:image/png;base64,…" }
+ *          Body: { payload: "<EMVCo TLV string>" }
  *          Returns the parsed EMVCo receiving information so the admin can
- *          eyeball it before confirming.
+ *          eyeball it before confirming. Nothing is persisted.
  *
  *   PUT  — confirm a decoded payload and make it the storefront's payment QR
  *          Body: { payload: "<EMVCo TLV string>" }
  *          Stores it as the `promptpay_qr_payload` setting (owner only).
  *
- *   DELETE — clear the confirmed payload, falling back to the PromptPay ID
- *            (owner only).
+ *   DELETE — clear the confirmed payload (owner only). The storefront then
+ *            reports that payment is not configured and blocks checkout.
  *
  * Why decode server-side?
  * -----------------------
  * The admin uploads a screenshot of the bank's "receive money" QR. We must
- * show the *actual* receiving account (PromptPay ID / bank / account name)
- * before it is trusted, so the admin can catch a wrong or malicious QR. The
- * decoding is pure TLV parsing — no image library is needed because the
- * browser reads the QR pixels and sends us the raw payload string.
+ * show the *actual* receiving account (PromptPay ID / type / amount) before it
+ * is trusted, so the admin can catch a wrong or malicious QR. The decoding is
+ * pure TLV parsing — no image library is needed because the browser reads the
+ * QR pixels and sends us the raw payload string.
  *
  * The storefront then rebuilds the QR from this confirmed payload, injecting
  * the order amount into field 54 (transaction amount) and recomputing the
- * CRC. This guarantees the buyer pays the confirmed account, not whatever
- * `promptpay_id` happens to be set to.
+ * CRC. This guarantees the buyer pays the confirmed account.
  */
 
 import { requireRole, withErrors, sendJson, readBody, HttpError } from "./_auth.js";
@@ -39,10 +45,11 @@ const MAX_PAYLOAD = 1000;
 export const PAYLOAD_SETTING_KEY = "promptpay_qr_payload";
 
 function handler(req, res) {
+  if (req.method === "GET") return getQr(req, res);
   if (req.method === "POST") return decodeQr(req, res);
   if (req.method === "PUT") return confirmQr(req, res);
   if (req.method === "DELETE") return clearQr(req, res);
-  res.setHeader("Allow", "POST, PUT, DELETE");
+  res.setHeader("Allow", "GET, POST, PUT, DELETE");
   return sendJson(res, 405, { error: "Method not allowed." });
 }
 
@@ -192,6 +199,37 @@ function decodePayload(payload) {
 // -----------------------------------------------------------------------------
 
 /**
+ * GET — read the currently confirmed payload.
+ *
+ * Admins may inspect it (they can decode uploads but cannot change the active
+ * account); owners may also confirm or clear it. A malformed legacy row is
+ * returned with `decoded: null` rather than failing the whole request, so the
+ * owner can still see that something is stored and replace it.
+ */
+async function getQr(req, res) {
+  const { admin } = await requireRole(req, "admin");
+  const { data, error } = await admin
+    .from("pomelo_settings")
+    .select("value")
+    .eq("key", PAYLOAD_SETTING_KEY)
+    .maybeSingle();
+
+  if (error) throw new HttpError(500, "Failed to load payment QR: " + error.message);
+
+  const payload = data && data.value ? String(data.value) : "";
+  let decoded = null;
+  if (payload) {
+    try {
+      decoded = decodePayload(payload);
+    } catch {
+      decoded = null;
+    }
+  }
+
+  return sendJson(res, 200, { payload, decoded });
+}
+
+/**
  * POST — decode a QR image.
  *
  * The browser cannot reliably decode QR pixels without a heavy library, so the
@@ -244,7 +282,7 @@ async function confirmQr(req, res) {
   return sendJson(res, 200, { ok: true, decoded });
 }
 
-/** DELETE — remove the confirmed payload (revert to the PromptPay ID). */
+/** DELETE — remove the confirmed payload (payment becomes unavailable). */
 async function clearQr(req, res) {
   const { admin } = await requireRole(req, "owner");
   const { error } = await admin

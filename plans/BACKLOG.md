@@ -16,13 +16,13 @@ Last updated: 2026-10-17
 
 | 分类 | 未完成 | 已完成 |
 | --- | --- | --- |
-| 安全 / 权限（SEC） | 8 | 9 |
+| 安全 / 权限（SEC） | 7 | 11 |
 | 功能（FEAT） | 5 | 1 |
-| 运维 / 部署（OPS） | 6 | 0 |
+| 运维 / 部署（OPS） | 7 | 0 |
 | 文档（DOC） | 3 | 0 |
-| 测试（TEST） | 4 | 0 |
+| 测试（TEST） | 5 | 0 |
 
-**上线前必须完成：** `OPS-01`、`OPS-02`、`OPS-06`（迁移 0006）、`OPS-03`。
+**上线前必须完成：** `OPS-01`、`OPS-02`、`OPS-06`（迁移 0006）、`OPS-07`（迁移 0007）、`OPS-03`。
 
 ---
 
@@ -49,7 +49,7 @@ Last updated: 2026-10-17
 - [x] **SEC-08** `P1-4` 删除 slip bucket 的匿名列举策略，改为仅 active staff 可列举。
       → [`0005_pomelo_security_hardening.sql`](../supabase/migrations/0005_pomelo_security_hardening.sql:314)
 - [x] **SEC-09** `P2-1` 设置页与 `GET /api/admin/settings` 提升为 `admin+`。
-      → [`admin.html`](../admin.html:258)、[`api/admin/settings.js`](../api/admin/settings.js:43)
+      → 后续已整体删除（见 SEC-18）：`敏感设置` 页、`/api/admin/settings` 与银行字段全部移除。
 
 ### 未完成
 
@@ -88,10 +88,17 @@ Last updated: 2026-10-17
       涉及：[`login.html`](../login.html:101)、[`admin.html`](../admin.html:316)、[`index.html`](../index.html:1) 中的 supabase-js / qrcode-generator。
       优先级：`P3` · 状态：`未开始`
 
-- [ ] **SEC-17** 未验证 `promptpay_qr_payload` 是否只能经 `/api/admin/payment-qr` 写入。
-      现状：已从 `WRITABLE_KEYS` 移除，但需确认 owner 无法通过其他路径（如直接 SQL / 未来新增端点）写入未校验 payload。
-      优先级：`P3` · 状态：`待验证`
-      涉及：[`api/admin/settings.js`](../api/admin/settings.js:17)
+- [x] **SEC-17** 未验证 `promptpay_qr_payload` 是否只能经 `/api/admin/payment-qr` 写入。
+      已解决：`/api/admin/settings` 已删除，`promptpay_qr_payload` 的唯一写入路径是
+      `PUT /api/admin/payment-qr`，保存前重新校验 EMVCo CRC 与 merchant GUID。
+      → [`api/admin/payment-qr.js`](../api/admin/payment-qr.js:1)
+
+- [x] **SEC-18** `敏感设置` 与 `收款二维码` 功能重叠，且银行字段完全未被使用。
+      已解决：删除 `敏感设置` 页、`/api/admin/settings`、`promptpay_id`、`bank_name`、`bank_account`、
+      `bank_holder` 以及 `promptpay.js` 回退生成器；`promptpay_qr_payload` 成为唯一收款配置。
+      新增 `GET /api/admin/payment-qr` 供后台读取已确认二维码；未确认二维码时前台明确提示并禁止下单。
+      新增迁移 `0007_pomelo_payment_qr_only.sql` 清理旧设置行并收窄 anon 读取策略。
+      → [`plans/payment-settings-consolidation.md`](payment-settings-consolidation.md)
 
 ---
 
@@ -143,6 +150,12 @@ Last updated: 2026-10-17
 - [ ] **OPS-02** 在 Supabase SQL Editor 按顺序执行 `0005_pomelo_security_hardening.sql`，并确认末尾校验查询全部返回 `0` / `false`。
       优先级：`P0` · 状态：`未开始`
 
+- [ ] **OPS-07** 执行 `0007_pomelo_payment_qr_only.sql`（删除 `promptpay_id` / `bank_*` 行，anon 仅可读 `promptpay_qr_payload`）。
+      **执行顺序**：先部署代码 → owner 在「收款二维码」确认二维码 → 前台验证支付二维码正确 → 再执行本迁移。
+      否则仅配置过 `promptpay_id` 的店铺会失去收款配置。
+      优先级：`P0` · 状态：`未开始`
+      涉及：[`0007_pomelo_payment_qr_only.sql`](../supabase/migrations/0007_pomelo_payment_qr_only.sql:1)
+
 - [ ] **OPS-03** 在 Supabase Auth 设置中**关闭公开注册**（`Disable signup`），员工账号只能由 owner 在后台创建。
       优先级：`P0` · 状态：`未开始`
 
@@ -181,9 +194,16 @@ Last updated: 2026-10-17
 - [ ] **TEST-02** 直接 PostgREST 越权负向测试：
       - 普通用户 PATCH 自己的 `profiles.role` → 应失败
       - `user` PATCH `pomelo_orders.total_satang` → 应失败
-      - anon SELECT `pomelo_settings` 的 `bank_account` → 应返回空
+      - anon SELECT `pomelo_settings` 的 `promptpay_id` / `bank_*` → 应返回空（行已删除）
       - anon SELECT `storage.objects` 列举 slips → 应返回空
       - anon INSERT `slip_url = 'javascript:alert(1)'` → 应被拒绝
+      优先级：`P1` · 状态：`未开始`
+
+- [ ] **TEST-05** 收款二维码单一配置回归：
+      - 未确认二维码时，前台显示「卖家尚未配置收款二维码」且提交按钮保持禁用
+      - `admin` 可 `GET` / `POST` `/api/admin/payment-qr`，`PUT` / `DELETE` 返回 403
+      - `owner` 确认后前台生成含正确金额的二维码，清除后立即恢复为不可支付
+      - `/api/config` 不再返回 `promptPayId`
       优先级：`P1` · 状态：`未开始`
 
 - [ ] **TEST-03** 最后一个 owner 保护测试：尝试降级 / 停用唯一 active owner → 应返回 400/42501。
@@ -204,6 +224,7 @@ Last updated: 2026-10-17
 
 | 日期 | ID | 说明 |
 | --- | --- | --- |
+| 2026-10-17 | SEC-18 | 删除与「收款二维码」重叠的「敏感设置」：移除 `api/admin/settings.js`、`promptpay_id`、`bank_name` / `bank_account` / `bank_holder`、`promptpay.js` 回退生成器；新增 `GET /api/admin/payment-qr`；前台未确认二维码时禁止下单；新增迁移 `0007_pomelo_payment_qr_only.sql`。详见 [`payment-settings-consolidation.md`](payment-settings-consolidation.md)。 |
 | 2026-10-17 | SEC-01 ~ SEC-09 | 完成审计中的全部 P0 / P1 修复，并顺带完成 P2-1（设置页 admin+）。新增迁移 `0005_pomelo_security_hardening.sql`，改写 `_auth.js` / `settings.js` / `users.js`，更新 `admin.html` / `admin.js`。所有 JS 通过 `node --check`。 |
 | 2026-10-17 | FEAT-01 | owner 创建 admin/员工：邮箱即登录名，初始密码 `123456`，`must_change_password` 强制首登改密。新增迁移 `0006_pomelo_forced_password_change.sql`、端点 `api/admin/change-password.js`；`me.js` 返回标记；`users.js` 支持默认密码与 owner 重置；`admin.html`/`admin.js` 增加阻塞式改密弹窗与「重置密码」按钮。所有 JS 通过 `node --check`。 |
 | 2026-10-17 | FEAT-01 修复 | 创建账号报 `Password should be at least 6 characters`：Supabase Auth 最短 6 位，初始密码由 `1234` 改为 `123456`，同步更新 `admin.html` 提示与 `admin.js` 文案。 |

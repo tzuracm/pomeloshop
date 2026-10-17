@@ -103,6 +103,7 @@
     slipPreviewUrl: null,
     submitting: false,
     lastQrPayload: null,
+    paymentReady: false, // true only when a confirmed QR is rendered
     deliveryCode: ""    // currently selected delivery method code
   };
 
@@ -243,6 +244,7 @@
 
   function updateSubmitState() {
     var ok =
+      state.paymentReady &&
       totalSatang() > 0 &&
       el.wechatName.value.trim().length > 0 &&
       el.phone.value.trim().length > 0 &&
@@ -253,18 +255,13 @@
 
   // ---------------------------------------------------------------------
   // 7. PromptPay QR generation
-  //    promptpay.js builds the EMVCo payload; qrcode-generator renders it.
-  //
-  //    Two sources, in priority order:
-  //      1. promptPayQrPayload — the EMVCo payload decoded from the bank QR the
-  //         owner uploaded and confirmed in /admin.html. We inject the order
-  //         amount into field 54 and recompute the CRC, so the buyer pays the
-  //         exact account the owner verified.
-  //      2. promptPayId — the legacy path, building a fresh payload from the
-  //         PromptPay ID.
+  //    The confirmed bank-QR payload is the ONLY payment source. We inject the
+  //    order amount into field 54 and recompute the CRC, so the buyer pays the
+  //    exact account the owner verified in /admin.html. When no payload is
+  //    confirmed, payment is unavailable and checkout is blocked.
   // ---------------------------------------------------------------------
 
-  /** CRC16-XMODEM (poly 0x1021, init 0xFFFF) — matches promptpay.js. */
+  /** CRC16-XMODEM (poly 0x1021, init 0xFFFF) — the checksum PromptPay requires. */
   function crc16xmodem(str, crc) {
     crc = crc || 0;
     for (var i = 0; i < str.length; i++) {
@@ -319,36 +316,45 @@
 
   function renderQr(satang) {
     if (!state.config) return;
-    var hasPayload = !!state.config.promptPayQrPayload;
-    if (!hasPayload && !state.config.promptPayId) return;
+
+    // No confirmed QR means the seller cannot be paid. Say so explicitly and
+    // keep checkout disabled rather than rendering a QR to an unknown account.
+    if (!state.config.promptPayQrPayload) {
+      state.paymentReady = false;
+      state.lastQrPayload = null;
+      el.qrFrame.innerHTML =
+        '<div class="placeholder">卖家尚未配置收款二维码<br />请联系卖家</div>';
+      updateSubmitState();
+      return;
+    }
 
     if (satang <= 0) {
       el.qrFrame.innerHTML =
         '<div class="placeholder">选择规格后<br />自动生成支付二维码</div>';
       state.lastQrPayload = null;
+      state.paymentReady = false;
+      updateSubmitState();
       return;
     }
 
     var amountBaht = satang / 100;
     var payload;
     try {
-      if (hasPayload) {
-        // Confirmed bank QR: reuse its account, inject the order amount.
-        payload = applyAmountToPayload(state.config.promptPayQrPayload, amountBaht);
-      } else {
-        // promptpay.js exposes `generatePayload(id, { amount })`.
-        payload = window.generatePayload(state.config.promptPayId, { amount: amountBaht });
-      }
+      // Confirmed bank QR: reuse its account, inject the order amount.
+      payload = applyAmountToPayload(state.config.promptPayQrPayload, amountBaht);
     } catch (e) {
       console.error("[pomelo] promptpay payload error:", e);
+      state.paymentReady = false;
       el.qrFrame.innerHTML =
         '<div class="placeholder">收款信息无效<br />请联系卖家</div>';
+      updateSubmitState();
       return;
     }
 
     // Avoid re-rendering the same QR on every keystroke.
     if (payload === state.lastQrPayload) return;
     state.lastQrPayload = payload;
+    state.paymentReady = true;
 
     // qrcode-generator API:
     //   var qr = qrcode(typeNumber, errorCorrectionLevel)
@@ -362,8 +368,10 @@
       qr.make();
     } catch (e) {
       console.error("[pomelo] QR encode error:", e);
+      state.paymentReady = false;
       el.qrFrame.innerHTML =
         '<div class="placeholder">二维码生成失败<br />请刷新重试</div>';
+      updateSubmitState();
       return;
     }
 
@@ -373,6 +381,7 @@
     img.alt = "PromptPay 支付二维码";
     img.src = dataUrl;
     el.qrFrame.appendChild(img);
+    updateSubmitState();
   }
 
   // ---------------------------------------------------------------------
@@ -900,11 +909,9 @@
       document.title = cfg.shopName + " · 柚子下单";
     }
 
-    if (cfg.promptPayId) {
-      el.ppId.textContent = "PromptPay: " + cfg.promptPayId;
-    } else if (cfg.promptPayQrPayload) {
-      el.ppId.textContent = "PromptPay · 已确认收款账户";
-    }
+    // The confirmed QR payload is the only payment source; never show a stale
+    // identifier that differs from the account the QR actually pays.
+    el.ppId.textContent = cfg.promptPayQrPayload ? "PromptPay · 已确认收款账户" : "";
 
     // Swap in the live catalogue. An empty array is meaningful: it means every
     // product is currently down-listed, so we must NOT fall back to the
@@ -965,28 +972,25 @@
   }
 
   /**
-   * Refresh the payment keys straight from Supabase.
+   * Refresh the confirmed payment QR straight from Supabase.
    *
    * /api/config is a serverless function that may be cached by the CDN or a
    * service worker. The owner can change the receiving account at any time, so
-   * we re-read the two payment keys directly from `pomelo_settings` (anon RLS
-   * allows exactly these two keys) and override the config. This guarantees the
-   * buyer always sees the account the owner most recently confirmed.
+   * we re-read `promptpay_qr_payload` directly from `pomelo_settings` (anon RLS
+   * allows exactly this key) and override the config. This guarantees the buyer
+   * always sees the account the owner most recently confirmed.
    */
   function refreshPaymentSettings() {
     if (!state.supabase) return Promise.resolve();
     return state.supabase
       .from("pomelo_settings")
       .select("key, value")
-      .in("key", ["promptpay_id", "promptpay_qr_payload"])
+      .eq("key", "promptpay_qr_payload")
       .then(function (res) {
         if (res.error || !Array.isArray(res.data)) return;
         var next = Object.assign({}, state.config || {});
-        for (var i = 0; i < res.data.length; i++) {
-          var row = res.data[i];
-          if (row.key === "promptpay_id") next.promptPayId = row.value || "";
-          if (row.key === "promptpay_qr_payload") next.promptPayQrPayload = row.value || "";
-        }
+        // An absent row means the owner cleared the QR: drop any stale value.
+        next.promptPayQrPayload = res.data.length ? (res.data[0].value || "") : "";
         state.config = next;
         // Force a re-render even if the payload string is unchanged.
         state.lastQrPayload = null;
@@ -1008,8 +1012,8 @@
     var ready = window.__pomeloConfigReady || Promise.resolve(window.POMELO_CONFIG || {});
     ready.then(function (cfg) {
       applyConfig(cfg || {});
-      refreshTotals(); // re-render QR now that promptPayId is known
-      // Override with the freshest payment keys from Supabase.
+      refreshTotals(); // re-render QR now that the payment payload is known
+      // Override with the freshest payment QR from Supabase.
       return refreshPaymentSettings();
     });
   }

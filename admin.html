@@ -174,7 +174,6 @@
     <button class="tab" data-tab="delivery" data-min="admin">交货方式</button>
     <button class="tab" data-tab="payment" data-min="admin">收款二维码</button>
     <button class="tab" data-tab="content" data-min="owner">页面文字</button>
-    <button class="tab" data-tab="settings" data-min="admin">敏感设置</button>
     <button class="tab" data-tab="users" data-min="owner">员工与权限</button>
   </nav>
 
@@ -246,8 +245,10 @@
     <div class="card">
       <h2>收款二维码</h2>
       <p class="readonly-note">
-        上传银行 App 的「收款二维码」截图。系统会解码并显示其中的收款信息，
-        请核对无误后点击「确认使用」。确认后，买家下单时的支付二维码将以此账户生成。
+        这是<strong>唯一的收款配置</strong>。上传银行 App 的「收款二维码」截图，
+        系统会解码并显示其中的收款信息，请核对无误后点击「确认使用」。
+        确认后，买家下单时的支付二维码将以此账户生成；
+        <strong>未确认收款二维码时，买家无法下单支付。</strong>
       </p>
 
       <div class="form-grid">
@@ -285,18 +286,6 @@
       <div id="contentBody"><div class="empty">加载中…</div></div>
       <div style="margin-top:12px;">
         <button class="btn" id="contentSave">保存全部</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================== Settings ===================== -->
-  <section class="panel" id="panel-settings">
-    <div class="card">
-      <h2>敏感设置</h2>
-      <p class="readonly-note" id="settingsNote"></p>
-      <div id="settingsBody"><div class="empty">加载中…</div></div>
-      <div style="margin-top:12px;">
-        <button class="btn" id="settingsSave">保存设置</button>
       </div>
     </div>
   </section>
