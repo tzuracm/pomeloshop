@@ -13,7 +13,16 @@
 import { requireRole, withErrors, sendJson, readBody, HttpError } from "./_auth.js";
 
 /** Keys the owner is allowed to write. Extend as needed. */
-const WRITABLE_KEYS = new Set(["promptpay_id", "bank_name", "bank_account", "bank_holder"]);
+const WRITABLE_KEYS = new Set([
+  "promptpay_id",
+  "bank_name",
+  "bank_account",
+  "bank_holder",
+  // Confirmed EMVCo payload decoded from an uploaded bank QR. Written by
+  // /api/admin/payment-qr (owner only); listed here so the generic settings
+  // endpoint does not reject it if the owner edits it directly.
+  "promptpay_qr_payload",
+]);
 
 const MAX_VALUE = 500;
 

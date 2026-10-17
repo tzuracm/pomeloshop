@@ -8,6 +8,9 @@
  *   - supabaseUrl      : public project URL
  *   - supabaseAnonKey  : public anon key (protected by RLS)
  *   - promptPayId      : the seller's PromptPay identifier
+ *   - promptPayQrPayload : confirmed EMVCo payload from an uploaded bank QR
+ *                        (when set, the storefront builds the QR from this
+ *                        instead of promptPayId)
  *   - shopName         : display name
  *   - catalogue        : active products (from pomelo_catalogue)
  *   - content          : editable page text (from pomelo_page_content)
@@ -49,6 +52,7 @@ export default async function handler(req, res) {
     supabaseUrl,
     supabaseAnonKey,
     promptPayId: process.env.PROMPTPAY_ID || "",
+    promptPayQrPayload: "",
     shopName: process.env.SHOP_NAME || "Pomelo Shop",
     catalogue: [],
     content: {},
@@ -95,6 +99,12 @@ export default async function handler(req, res) {
     // A settings row overrides the env fallback for promptpay_id.
     for (const row of settings) {
       if (row.key === "promptpay_id" && row.value) config.promptPayId = row.value;
+      // A confirmed bank-QR payload takes precedence over the raw ID: the
+      // storefront rebuilds the QR from it so the buyer pays the exact account
+      // the owner verified in the admin console.
+      if (row.key === "promptpay_qr_payload" && row.value) {
+        config.promptPayQrPayload = row.value;
+      }
     }
 
     for (const row of content) {
@@ -107,7 +117,8 @@ export default async function handler(req, res) {
   const missing = [];
   if (!config.supabaseUrl) missing.push("SUPABASE_URL");
   if (!config.supabaseAnonKey) missing.push("SUPABASE_ANON_KEY");
-  if (!config.promptPayId) missing.push("PROMPTPAY_ID");
+  // Either a confirmed QR payload or a PromptPay ID is enough to take payment.
+  if (!config.promptPayId && !config.promptPayQrPayload) missing.push("PROMPTPAY_ID");
 
   res.status(200).json({ ...config, missing });
 }

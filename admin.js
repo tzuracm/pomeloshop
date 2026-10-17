@@ -48,7 +48,10 @@
     deliveryMethods: [],
     content: {},
     settings: {},
-    users: []
+    users: [],
+    // Payment QR upload flow
+    qrFile: null,
+    qrDecoded: null
   };
 
   var el = {};
@@ -160,6 +163,11 @@
       ? "这些设置对所有人可见，但只有所有者可以修改。"
       : "这些设置对所有人可见，只有所有者可以修改（你当前为只读）。";
 
+    // Payment QR: everyone admin+ may decode, but only the owner may confirm
+    // or clear the active payload. The server enforces this too.
+    if (el.qrConfirmBtn) el.qrConfirmBtn.style.display = isOwner ? "" : "none";
+    if (el.qrClearBtn) el.qrClearBtn.style.display = isOwner ? "" : "none";
+
     // Catalogue form: admin+ only (tab is hidden otherwise, but guard anyway).
     var catForm = el.panelCatalogue.querySelector(".form-grid");
     if (catForm) catForm.style.display = have >= ROLE_RANK.admin ? "" : "none";
@@ -182,6 +190,7 @@
     if (name === "orders") loadOrders();
     else if (name === "catalogue") loadCatalogue();
     else if (name === "delivery") loadDeliveryMethods();
+    else if (name === "payment") loadPaymentQr();
     else if (name === "content") loadContent();
     else if (name === "settings") loadSettings();
     else if (name === "users") loadUsers();
@@ -784,6 +793,277 @@
   }
 
   // --------------------------------------------------------------------------
+  // Payment QR (decode: admin+, confirm/clear: owner)
+  // --------------------------------------------------------------------------
+  //
+  // Flow:
+  //   1. admin picks a screenshot of the bank's receive-money QR
+  //   2. we read the QR pixels in the browser (BarcodeDetector) and POST the
+  //      raw payload to /api/admin/payment-qr for authoritative decoding
+  //   3. the decoded receiving info is shown for the admin to verify
+  //   4. the owner confirms -> PUT stores it as `promptpay_qr_payload`
+  //   5. the storefront rebuilds its QR from that payload (see app.js)
+
+  function loadPaymentQr() {
+    el.qrCurrent.innerHTML = '<div class="empty">加载中…</div>';
+    api("/api/admin/settings")
+      .then(function (data) {
+        state.settings = {};
+        (data.settings || []).forEach(function (row) { state.settings[row.key] = row.value; });
+        renderCurrentPaymentQr();
+      })
+      .catch(function (err) {
+        el.qrCurrent.innerHTML = '<div class="empty">加载失败</div>';
+        fail(err);
+      });
+  }
+
+  /** Render the currently confirmed payload (or a "not set" notice). */
+  function renderCurrentPaymentQr() {
+    var payload = state.settings.promptpay_qr_payload || "";
+    var isOwner = state.role === "owner";
+
+    el.qrClearBtn.style.display = isOwner && payload ? "" : "none";
+
+    if (!payload) {
+      el.qrCurrent.innerHTML =
+        '<h3>当前收款二维码</h3>' +
+        '<p class="muted" style="margin:0;">尚未上传并确认收款二维码。' +
+          '买家目前使用「敏感设置」中的 PromptPay ID 生成二维码。</p>';
+      return;
+    }
+
+    // Decode locally for display — the server already validated it on save.
+    var info;
+    try {
+      info = decodeEmvLocally(payload);
+    } catch (e) {
+      info = null;
+    }
+
+    var rows = info
+      ? '<dl>' +
+          "<dt>PromptPay ID</dt><dd>" + escapeHtml(info.promptPayId) + "</dd>" +
+          "<dt>类型</dt><dd>" + escapeHtml(targetTypeLabel(info.targetType)) + "</dd>" +
+          "<dt>金额</dt><dd>" + (info.amount != null ? "฿" + escapeHtml(String(info.amount)) : "任意金额（静态码）") + "</dd>" +
+        "</dl>"
+      : '<p class="muted" style="margin:0;">已保存收款二维码（无法在本地解析）。</p>';
+
+    el.qrCurrent.innerHTML =
+      "<h3>当前收款二维码 <span class=\"pill paid\">已确认</span></h3>" +
+      rows +
+      '<div class="qr-mini" id="qrCurrentMini"></div>';
+
+    // Draw a preview of the confirmed payload.
+    var mini = $("qrCurrentMini");
+    if (mini && window.qrcode) {
+      try {
+        var qr = window.qrcode(0, "M");
+        qr.addData(payload);
+        qr.make();
+        var img = document.createElement("img");
+        img.alt = "当前收款二维码";
+        img.src = qr.createDataURL(4, 4);
+        mini.appendChild(img);
+      } catch (e) {
+        mini.textContent = "预览生成失败";
+      }
+    }
+  }
+
+  /** Human label for a PromptPay target type. */
+  function targetTypeLabel(type) {
+    if (type === "mobile") return "手机号";
+    if (type === "national-id") return "身份证 / 税号";
+    if (type === "e-wallet") return "电子钱包";
+    return type || "—";
+  }
+
+  /**
+   * Minimal local EMVCo decoder for display purposes only. The server is the
+   * authority; this just lets us show the confirmed payload without a round
+   * trip. Returns { promptPayId, targetType, amount }.
+   */
+  function decodeEmvLocally(payload) {
+    function parseTlv(str) {
+      var out = [];
+      var i = 0;
+      while (i < str.length) {
+        var id = str.slice(i, i + 2);
+        var len = parseInt(str.slice(i + 2, i + 4), 10);
+        out.push({ id: id, value: str.slice(i + 4, i + 4 + len) });
+        i += 4 + len;
+      }
+      return out;
+    }
+    function field(fields, id) {
+      for (var i = 0; i < fields.length; i++) if (fields[i].id === id) return fields[i].value;
+      return "";
+    }
+    var fields = parseTlv(payload);
+    var merchant = parseTlv(field(fields, "29"));
+    var raw = field(merchant, "01") || field(merchant, "02") || field(merchant, "03");
+    var digits = String(raw).replace(/[^0-9]/g, "");
+    var id = digits;
+    if (digits.length === 13 && digits.indexOf("0066") === 0) id = "0" + digits.slice(4);
+    else if (digits.length === 13 && digits.indexOf("66") === 0) id = "0" + digits.slice(2);
+    var amountRaw = field(fields, "54");
+    var type;
+    if (digits.length >= 15) type = "e-wallet";
+    else if (digits.length === 13 && (digits.indexOf("0066") === 0 || digits.indexOf("66") === 0)) type = "mobile";
+    else if (digits.length >= 13) type = "national-id";
+    else type = "mobile";
+    return {
+      promptPayId: id,
+      targetType: type,
+      amount: amountRaw ? Number(amountRaw) : null
+    };
+  }
+
+  /** Read the QR payload from an image file using the BarcodeDetector API. */
+  function detectQrPayload(file) {
+    if (!("BarcodeDetector" in window)) {
+      return Promise.reject(new Error(
+        "当前浏览器不支持二维码识别（BarcodeDetector）。请使用最新版 Chrome / Edge / Safari。"
+      ));
+    }
+    var detector;
+    try {
+      detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+    } catch (e) {
+      return Promise.reject(new Error("无法初始化二维码识别器。"));
+    }
+
+    return createImageBitmap(file).then(function (bitmap) {
+      return detector.detect(bitmap).then(function (codes) {
+        if (!codes || !codes.length) {
+          throw new Error("图片中未识别到二维码，请上传更清晰的截图。");
+        }
+        return codes[0].rawValue;
+      });
+    });
+  }
+
+  function onQrFileChange() {
+    var file = el.qrFile.files && el.qrFile.files[0];
+    state.qrFile = file || null;
+    state.qrDecoded = null;
+    el.qrDecodeBtn.disabled = !file;
+    el.qrConfirmBar.hidden = true;
+    el.qrDecoded.hidden = true;
+    el.qrDecoded.innerHTML = "";
+
+    if (!file) {
+      el.qrUploadPreview.hidden = true;
+      return;
+    }
+
+    var url = URL.createObjectURL(file);
+    el.qrUploadImg.src = url;
+    el.qrUploadPreview.hidden = false;
+  }
+
+  function onQrDecode() {
+    if (!state.qrFile) return;
+    el.qrDecodeBtn.disabled = true;
+    hideAlert();
+
+    detectQrPayload(state.qrFile)
+      .then(function (payload) {
+        // Ask the server to authoritatively parse + validate the payload.
+        return api("/api/admin/payment-qr", { method: "POST", body: { payload: payload } });
+      })
+      .then(function (data) {
+        state.qrDecoded = data.decoded;
+        renderDecodedQr(data.decoded);
+        el.qrDecodeBtn.disabled = false;
+      })
+      .catch(function (err) {
+        el.qrDecodeBtn.disabled = false;
+        fail(err);
+      });
+  }
+
+  /** Show the decoded receiving info and the confirm bar. */
+  function renderDecodedQr(decoded) {
+    var crc = decoded.crcOk
+      ? '<span class="ok">✓ 校验通过</span>'
+      : '<span class="warn">✗ 校验失败</span>';
+
+    el.qrDecoded.innerHTML =
+      "<h3>解码结果（请核对）</h3>" +
+      "<dl>" +
+        "<dt>PromptPay ID</dt><dd>" + escapeHtml(decoded.promptPayId) + "</dd>" +
+        "<dt>类型</dt><dd>" + escapeHtml(targetTypeLabel(decoded.targetType)) + "</dd>" +
+        "<dt>金额</dt><dd>" +
+          (decoded.amount != null ? "฿" + escapeHtml(String(decoded.amount)) : "任意金额（静态码）") +
+        "</dd>" +
+        "<dt>国家 / 币种</dt><dd>" + escapeHtml(decoded.country || "—") + " / " +
+          escapeHtml(decoded.currency || "—") + "</dd>" +
+        "<dt>校验</dt><dd>" + crc + "</dd>" +
+      "</dl>";
+
+    el.qrDecoded.hidden = false;
+
+    var isOwner = state.role === "owner";
+    el.qrConfirmBar.hidden = false;
+    el.qrConfirmBtn.style.display = isOwner ? "" : "none";
+    if (!isOwner) {
+      showAlert("error", "解码成功。只有所有者可以确认并启用收款二维码。");
+    }
+  }
+
+  function onQrConfirm() {
+    if (!state.qrDecoded || !state.qrDecoded.payload) return;
+    el.qrConfirmBtn.disabled = true;
+    hideAlert();
+
+    api("/api/admin/payment-qr", { method: "PUT", body: { payload: state.qrDecoded.payload } })
+      .then(function (data) {
+        el.qrConfirmBtn.disabled = false;
+        state.settings.promptpay_qr_payload = data.decoded.payload;
+        el.qrConfirmBar.hidden = true;
+        el.qrDecoded.hidden = true;
+        el.qrUploadPreview.hidden = true;
+        el.qrFile.value = "";
+        el.qrDecodeBtn.disabled = true;
+        state.qrFile = null;
+        state.qrDecoded = null;
+        renderCurrentPaymentQr();
+        showAlert("ok", "收款二维码已确认并启用。买家下单时将使用此账户生成支付二维码。");
+      })
+      .catch(function (err) {
+        el.qrConfirmBtn.disabled = false;
+        fail(err);
+      });
+  }
+
+  function onQrCancel() {
+    state.qrDecoded = null;
+    el.qrConfirmBar.hidden = true;
+    el.qrDecoded.hidden = true;
+    el.qrDecoded.innerHTML = "";
+  }
+
+  function onQrClear() {
+    if (!window.confirm("确定要清除已确认的收款二维码吗？清除后将回退到 PromptPay ID。")) return;
+    el.qrClearBtn.disabled = true;
+    hideAlert();
+
+    api("/api/admin/payment-qr", { method: "DELETE" })
+      .then(function () {
+        el.qrClearBtn.disabled = false;
+        delete state.settings.promptpay_qr_payload;
+        renderCurrentPaymentQr();
+        showAlert("ok", "已清除收款二维码，买家将使用 PromptPay ID 生成二维码。");
+      })
+      .catch(function (err) {
+        el.qrClearBtn.disabled = false;
+        fail(err);
+      });
+  }
+
+  // --------------------------------------------------------------------------
   // Users & roles (owner)
   // --------------------------------------------------------------------------
 
@@ -897,6 +1177,17 @@
     el.dmSave = $("dmSave");
     el.deliveryBody = $("deliveryBody");
 
+    el.qrFile = $("qrFile");
+    el.qrDecodeBtn = $("qrDecodeBtn");
+    el.qrClearBtn = $("qrClearBtn");
+    el.qrUploadPreview = $("qrUploadPreview");
+    el.qrUploadImg = $("qrUploadImg");
+    el.qrDecoded = $("qrDecoded");
+    el.qrConfirmBar = $("qrConfirmBar");
+    el.qrConfirmBtn = $("qrConfirmBtn");
+    el.qrCancelBtn = $("qrCancelBtn");
+    el.qrCurrent = $("qrCurrent");
+
     el.contentBody = $("contentBody");
     el.contentSave = $("contentSave");
 
@@ -930,6 +1221,12 @@
     el.dmSave.addEventListener("click", onDeliverySave);
     el.contentSave.addEventListener("click", onContentSave);
     el.settingsSave.addEventListener("click", onSettingsSave);
+
+    el.qrFile.addEventListener("change", onQrFileChange);
+    el.qrDecodeBtn.addEventListener("click", onQrDecode);
+    el.qrConfirmBtn.addEventListener("click", onQrConfirm);
+    el.qrCancelBtn.addEventListener("click", onQrCancel);
+    el.qrClearBtn.addEventListener("click", onQrClear);
   }
 
   /**

@@ -249,9 +249,73 @@
   // ---------------------------------------------------------------------
   // 7. PromptPay QR generation
   //    promptpay.js builds the EMVCo payload; qrcode-generator renders it.
+  //
+  //    Two sources, in priority order:
+  //      1. promptPayQrPayload — the EMVCo payload decoded from the bank QR the
+  //         owner uploaded and confirmed in /admin.html. We inject the order
+  //         amount into field 54 and recompute the CRC, so the buyer pays the
+  //         exact account the owner verified.
+  //      2. promptPayId — the legacy path, building a fresh payload from the
+  //         PromptPay ID.
   // ---------------------------------------------------------------------
+
+  /** CRC16-XMODEM (poly 0x1021, init 0xFFFF) — matches promptpay.js. */
+  function crc16xmodem(str, crc) {
+    crc = crc || 0;
+    for (var i = 0; i < str.length; i++) {
+      crc ^= str.charCodeAt(i) << 8;
+      for (var j = 0; j < 8; j++) {
+        crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+        crc &= 0xffff;
+      }
+    }
+    return crc;
+  }
+
+  /** TLV field: 2-char id + 2-char zero-padded length + value. */
+  function tlv(id, value) {
+    return id + ("00" + value.length).slice(-2) + value;
+  }
+
+  /**
+   * Rebuild a confirmed EMVCo payload with a specific amount.
+   *
+   * The stored payload may be static (no field 54) or dynamic (amount baked
+   * in). Either way we drop any existing amount, append the order amount, and
+   * recompute the CRC over the new prefix. Field order is preserved so the
+   * result stays spec-compliant.
+   */
+  function applyAmountToPayload(basePayload, amountBaht) {
+    var str = String(basePayload || "").trim();
+    if (!str) throw new Error("empty payload");
+
+    // Strip the trailing CRC field (63) — we recompute it below.
+    var crcIdx = str.lastIndexOf("6304");
+    if (crcIdx < 0) throw new Error("payload has no CRC field");
+    var body = str.slice(0, crcIdx);
+
+    // Remove any existing transaction-amount field (54) from the body.
+    var out = "";
+    var i = 0;
+    while (i < body.length) {
+      var id = body.slice(i, i + 2);
+      var len = parseInt(body.slice(i + 2, i + 4), 10);
+      var field = body.slice(i, i + 4 + len);
+      if (id !== "54") out += field;
+      i += 4 + len;
+    }
+
+    // Append the amount, then the CRC header, then the checksum.
+    out += tlv("54", Number(amountBaht).toFixed(2));
+    var toCrc = out + "6304";
+    var crc = ("0000" + crc16xmodem(toCrc, 0xffff).toString(16).toUpperCase()).slice(-4);
+    return toCrc + crc;
+  }
+
   function renderQr(satang) {
-    if (!state.config || !state.config.promptPayId) return;
+    if (!state.config) return;
+    var hasPayload = !!state.config.promptPayQrPayload;
+    if (!hasPayload && !state.config.promptPayId) return;
 
     if (satang <= 0) {
       el.qrFrame.innerHTML =
@@ -263,12 +327,17 @@
     var amountBaht = satang / 100;
     var payload;
     try {
-      // promptpay.js exposes `generatePayload(id, { amount })`.
-      payload = window.generatePayload(state.config.promptPayId, { amount: amountBaht });
+      if (hasPayload) {
+        // Confirmed bank QR: reuse its account, inject the order amount.
+        payload = applyAmountToPayload(state.config.promptPayQrPayload, amountBaht);
+      } else {
+        // promptpay.js exposes `generatePayload(id, { amount })`.
+        payload = window.generatePayload(state.config.promptPayId, { amount: amountBaht });
+      }
     } catch (e) {
       console.error("[pomelo] promptpay payload error:", e);
       el.qrFrame.innerHTML =
-        '<div class="placeholder">PromptPay ID 无效<br />请联系卖家</div>';
+        '<div class="placeholder">收款信息无效<br />请联系卖家</div>';
       return;
     }
 
@@ -828,6 +897,8 @@
 
     if (cfg.promptPayId) {
       el.ppId.textContent = "PromptPay: " + cfg.promptPayId;
+    } else if (cfg.promptPayQrPayload) {
+      el.ppId.textContent = "PromptPay · 已确认收款账户";
     }
 
     // Swap in the live catalogue when the server returned one.

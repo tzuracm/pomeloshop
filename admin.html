@@ -84,6 +84,40 @@
   }
   .slip-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
   .slip-thumb:hover { border-color: var(--brand); }
+
+  /* Payment QR upload + decode */
+  .qr-upload-preview {
+    margin: 12px 0; padding: 12px; border: 1px dashed var(--line);
+    border-radius: var(--radius-sm); background: #faf7f1; text-align: center;
+  }
+  .qr-upload-preview img {
+    display: inline-block; max-width: 220px; max-height: 220px;
+    border-radius: var(--radius-sm); background: #fff;
+  }
+  .qr-decoded {
+    margin-top: 12px; padding: 14px; border: 1px solid var(--line);
+    border-radius: var(--radius-sm); background: #fff;
+  }
+  .qr-decoded h3 { margin: 0 0 10px; font-size: 14px; }
+  .qr-decoded dl {
+    display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px;
+    margin: 0; font-size: 13px;
+  }
+  .qr-decoded dt { color: var(--ink-soft); }
+  .qr-decoded dd { margin: 0; font-weight: 600; word-break: break-all; }
+  .qr-decoded .warn { color: var(--err); font-weight: 700; }
+  .qr-decoded .ok { color: #1f9d55; font-weight: 700; }
+  .qr-current {
+    padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+    background: #faf7f1; font-size: 13px;
+  }
+  .qr-current h3 { margin: 0 0 8px; font-size: 14px; }
+  .qr-current .qr-mini {
+    display: inline-block; margin-top: 10px; padding: 8px; background: #fff;
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+  }
+  .qr-current .qr-mini img { display: block; width: 140px; height: 140px; }
+</style>
 </style>
 </head>
 <body>
@@ -103,6 +137,7 @@
     <button class="tab active" data-tab="orders">订单</button>
     <button class="tab" data-tab="catalogue" data-min="admin">商品</button>
     <button class="tab" data-tab="delivery" data-min="admin">交货方式</button>
+    <button class="tab" data-tab="payment" data-min="admin">收款二维码</button>
     <button class="tab" data-tab="content" data-min="owner">页面文字</button>
     <button class="tab" data-tab="settings" data-min="user">敏感设置</button>
     <button class="tab" data-tab="users" data-min="owner">员工与权限</button>
@@ -171,6 +206,43 @@
     </div>
   </section>
 
+  <!-- ===================== Payment QR ===================== -->
+  <section class="panel" id="panel-payment">
+    <div class="card">
+      <h2>收款二维码</h2>
+      <p class="readonly-note">
+        上传银行 App 的「收款二维码」截图。系统会解码并显示其中的收款信息，
+        请核对无误后点击「确认使用」。确认后，买家下单时的支付二维码将以此账户生成。
+      </p>
+
+      <div class="form-grid">
+        <div>
+          <label for="qrFile">上传收款二维码图片</label>
+          <input type="file" id="qrFile" accept="image/*" />
+        </div>
+        <div style="align-self:end;">
+          <div class="row-actions">
+            <button class="btn secondary" id="qrDecodeBtn" disabled>解码图片</button>
+            <button class="btn secondary" id="qrClearBtn" data-min="owner">清除已确认</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="qrUploadPreview" class="qr-upload-preview" hidden>
+        <img id="qrUploadImg" alt="上传的收款二维码" />
+      </div>
+
+      <div id="qrDecoded" class="qr-decoded" hidden></div>
+
+      <div id="qrConfirmBar" class="row-actions" style="margin-top:12px;" hidden>
+        <button class="btn" id="qrConfirmBtn" data-min="owner">确认使用此收款信息</button>
+        <button class="btn secondary" id="qrCancelBtn">取消</button>
+      </div>
+
+      <div id="qrCurrent" class="qr-current" style="margin-top:16px;"></div>
+    </div>
+  </section>
+
   <!-- ===================== Page content ===================== -->
   <section class="panel" id="panel-content">
     <div class="card">
@@ -204,6 +276,8 @@
 
   <script src="/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <!-- qrcode-generator renders the preview of the confirmed payment QR. -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
   <script src="/admin.js"></script>
 </body>
 </html>
