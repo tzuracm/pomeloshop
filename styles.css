@@ -74,6 +74,69 @@ body.config-pending #footerShop {
   font-size: 24px;
   letter-spacing: -.01em;
 }
+
+/* ---------- Shop name: gradient reveal on load ---------- */
+/*
+ * The shop name is painted with a warm brand gradient and revealed by
+ * sweeping the gradient's background-position from left to right while the
+ * text fades and lifts into place. The animation is keyed off
+ * `body.config-ready`, which app.js adds once /api/config has been applied,
+ * so the reveal starts exactly when the real (owner-configured) name is
+ * swapped in — never on the hard-coded fallback.
+ *
+ * `background-clip: text` needs the text to be transparent; the
+ * `-webkit-text-fill-color` fallback covers older WebKit. If a browser does
+ * not support text clipping at all, the @supports block below restores a
+ * plain solid colour so the name is never invisible.
+ */
+.hero h1 {
+  background-image: linear-gradient(
+    100deg,
+    var(--brand-ink) 0%,
+    #d98b00 28%,
+    var(--brand) 50%,
+    #d98b00 72%,
+    var(--brand-ink) 100%
+  );
+  background-size: 220% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--brand-ink);
+}
+
+body.config-ready .hero h1 {
+  animation: shop-name-reveal 1.1s cubic-bezier(.22,.61,.36,1) both;
+}
+
+@keyframes shop-name-reveal {
+  from {
+    background-position: 100% 0;
+    opacity: 0;
+    transform: translateY(6px);
+    filter: blur(2px);
+  }
+  to {
+    background-position: 0 0;
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+/* Browsers without text clipping: keep the name readable, fade only. */
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .hero h1 {
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+    color: var(--brand-ink);
+  }
+  @keyframes shop-name-reveal {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+}
 .hero p {
   margin: 0;
   color: var(--ink-soft);
