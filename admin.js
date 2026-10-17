@@ -216,7 +216,9 @@
       }).join("<br>");
 
       var slip = o.slip_url
-        ? '<a class="slip-link" href="' + escapeHtml(o.slip_url) + '" target="_blank" rel="noopener">查看</a>'
+        ? '<a class="slip-thumb" href="' + escapeHtml(o.slip_url) + '" target="_blank" rel="noopener" title="查看转账凭证">' +
+            '<img src="' + escapeHtml(o.slip_url) + '" alt="转账凭证" loading="lazy" />' +
+          "</a>"
         : '<span class="muted">—</span>';
 
       var statusOptions = ORDER_STATUSES.map(function (s) {

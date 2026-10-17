@@ -402,10 +402,14 @@
         // NOTE: deliberately NO `.select()` here. The anon role has an INSERT
         // policy but no SELECT policy (see 0001_pomelo_orders.sql), so asking
         // PostgREST to return the inserted row would fail RLS and surface as a
-        // spurious "提交订单失败" even though the row was written. We already
-        // generated `orderId` client-side and used it as the storage folder, so
-        // it is a valid reference to show the buyer.
+        // spurious "提交订单失败" even though the row was written.
+        //
+        // We DO send the client-generated `id` explicitly: the slip was already
+        // uploaded to the `<orderId>/` storage folder, so the row must carry the
+        // same id. Otherwise Postgres generates a different UUID and the slip
+        // folder no longer corresponds to the order it belongs to.
         return state.supabase.from(TABLE).insert({
+          id: orderId,
           wechat_name: wechatName,
           phone: phone,
           fulfilment: fulfilmentValue(),
