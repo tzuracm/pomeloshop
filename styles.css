@@ -442,6 +442,87 @@ a.delivery-row .v,
   word-break: break-all;
 }
 
+/* ---------- Social proof toast ---------- */
+/* Floating card that slides in from the bottom-right (bottom on mobile).
+   Hidden by default; app.js toggles .show. It is pointer-events:none while
+   hidden so it never blocks taps on the form underneath. */
+.sp-toast {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  padding: 11px 12px 11px 13px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--brand);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 6px rgba(43,33,24,.08), 0 12px 32px rgba(43,33,24,.14);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  opacity: 0;
+  transform: translateY(14px) scale(.98);
+  pointer-events: none;
+  transition: opacity .28s ease, transform .28s ease;
+}
+.sp-toast.show {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.sp-toast .sp-icon {
+  flex: none;
+  font-size: 18px;
+  line-height: 1;
+}
+.sp-toast .sp-text {
+  flex: 1;
+  min-width: 0;
+}
+.sp-toast .sp-text strong {
+  font-weight: 700;
+  color: var(--brand-ink);
+  font-variant-numeric: tabular-nums;
+}
+.sp-toast .sp-close {
+  flex: none;
+  width: 22px; height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.sp-toast .sp-close:hover { background: var(--brand-bg); color: var(--brand-ink); }
+
+/* Mobile: span the width, sit above the safe area. */
+@media (max-width: 480px) {
+  .sp-toast {
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-width: none;
+  }
+}
+
+/* Reduced motion: fade only, no slide/scale. */
+@media (prefers-reduced-motion: reduce) {
+  .sp-toast { transform: none; }
+  .sp-toast.show { transform: none; }
+}
+
 /* ---------- Footer ---------- */
 footer {
   text-align: center;

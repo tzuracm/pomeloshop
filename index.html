@@ -136,6 +136,18 @@
     <div class="ref" id="orderRef"></div>
   </section>
 
+  <!-- ===================== Social proof toast ===================== -->
+  <!--
+    Floating "someone just ordered / N people browsing" card. Purely
+    client-side simulated data (see initSocialProof in app.js). Hidden by
+    default; app.js adds .show to animate it in.
+  -->
+  <div class="sp-toast" id="socialProofToast" role="status" aria-live="polite" aria-atomic="true">
+    <span class="sp-icon" id="spIcon" aria-hidden="true">🛒</span>
+    <span class="sp-text" id="spText"></span>
+    <button type="button" class="sp-close" id="spClose" aria-label="关闭提示">✕</button>
+  </div>
+
   <footer>
     <div id="footerShop">Pomelo Shop</div>
     <div>支付由 PromptPay 提供 · 数据存储于 Supabase</div>

@@ -82,7 +82,11 @@
     submitLabel: $("submitLabel"),
     orderFlow:   $("orderFlow"),
     success:     $("successScreen"),
-    orderRef:    $("orderRef")
+    orderRef:    $("orderRef"),
+    spToast:     $("socialProofToast"),
+    spIcon:      $("spIcon"),
+    spText:      $("spText"),
+    spClose:     $("spClose")
   };
 
   // ---------------------------------------------------------------------
@@ -524,12 +528,181 @@
 
   function onSuccess(orderId) {
     setSubmitting(false);
+    spHide();
     el.orderFlow.style.display = "none";
     hideAlert(el.formAlert);
     hideAlert(el.configAlert);
     el.orderRef.textContent = "订单号：" + orderId;
     el.success.classList.add("show");
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // ---------------------------------------------------------------------
+  // 9d. Social proof toast (simulated)
+  // ---------------------------------------------------------------------
+  // A floating card that periodically announces "someone just ordered" or
+  // "N people are browsing". All numbers are simulated client-side — there is
+  // no real-time presence source, and anon cannot read orders (see
+  // 0001_pomelo_orders.sql). The owner can tune the ranges via
+  // pomelo_page_content keys (see CONTENT_KEYS in admin.js).
+  //
+  // Behaviour:
+  //   * first card appears after a short delay, then every 9–16s
+  //   * each card stays ~5s, then slides out
+  //   * pauses while the tab is hidden, while submitting, and on success
+  //   * after the visitor dismisses it twice, it stops for the session
+  var SP_DISMISS_KEY = "pomelo_sp_dismissed_v1";
+  var SP_MAX_DISMISSALS = 2;
+
+  var sp = {
+    timer: null,
+    hideTimer: null,
+    visible: false,
+    stopped: false,
+    dismissals: 0,
+    viewers: 0,
+    ordersToday: 0
+  };
+
+  function spRandomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  function spReadNumber(content, key, fallback) {
+    var n = parseInt(content && content[key], 10);
+    return isFinite(n) && n >= 0 ? n : fallback;
+  }
+
+  function spLoadDismissals() {
+    try {
+      sp.dismissals = parseInt(sessionStorage.getItem(SP_DISMISS_KEY), 10) || 0;
+    } catch (e) {
+      sp.dismissals = 0;
+    }
+    if (sp.dismissals >= SP_MAX_DISMISSALS) sp.stopped = true;
+  }
+
+  function spSaveDismissals() {
+    try {
+      sessionStorage.setItem(SP_DISMISS_KEY, String(sp.dismissals));
+    } catch (e) { /* private mode — ignore */ }
+  }
+
+  /** Pick a random catalogue label, falling back to a generic phrase. */
+  function spRandomSkuLabel() {
+    if (!CATALOGUE.length) return "柚子";
+    return CATALOGUE[spRandomInt(0, CATALOGUE.length - 1)].label;
+  }
+
+  /** Build one message: { icon, html }. */
+  function spNextMessage() {
+    var roll = Math.random();
+
+    // ~45%: someone just ordered
+    if (roll < 0.45) {
+      var mins = spRandomInt(1, 12);
+      var qty = spRandomInt(1, 3);
+      return {
+        icon: "🛒",
+        html: "<strong>" + mins + " 分钟前</strong>有人下单了 " +
+              escapeHtml(spRandomSkuLabel()) + " × " + qty
+      };
+    }
+
+    // ~30%: browsing now
+    if (roll < 0.75) {
+      return {
+        icon: "👀",
+        html: "约 <strong>" + sp.viewers + " 人</strong>正在浏览"
+      };
+    }
+
+    // ~25%: sold today
+    return {
+      icon: "🍊",
+      html: "今天已售出 <strong>" + sp.ordersToday + " 份</strong>"
+    };
+  }
+
+  function spShow() {
+    if (sp.stopped || sp.visible || !el.spToast) return;
+    if (document.visibilityState === "hidden") return;
+    if (state.submitting || el.success.classList.contains("show")) return;
+
+    var msg = spNextMessage();
+    el.spIcon.textContent = msg.icon;
+    el.spText.innerHTML = msg.html;
+    el.spToast.classList.add("show");
+    sp.visible = true;
+
+    sp.hideTimer = setTimeout(spHide, 5000);
+  }
+
+  function spHide() {
+    clearTimeout(sp.hideTimer);
+    sp.hideTimer = null;
+    if (!el.spToast) return;
+    el.spToast.classList.remove("show");
+    sp.visible = false;
+  }
+
+  function spScheduleNext(delay) {
+    clearTimeout(sp.timer);
+    if (sp.stopped) return;
+    sp.timer = setTimeout(function () {
+      spShow();
+      spScheduleNext(spRandomInt(9000, 16000));
+    }, delay);
+  }
+
+  function spDismiss() {
+    spHide();
+    sp.dismissals += 1;
+    spSaveDismissals();
+    if (sp.dismissals >= SP_MAX_DISMISSALS) {
+      sp.stopped = true;
+      clearTimeout(sp.timer);
+      sp.timer = null;
+    } else {
+      spScheduleNext(spRandomInt(12000, 20000));
+    }
+  }
+
+  function initSocialProof(content) {
+    if (!el.spToast) return;
+
+    spLoadDismissals();
+    if (sp.stopped) return;
+
+    // Seed the simulated counters from owner-editable config.
+    var baseOrders = spReadNumber(content, "social_proof_orders_base", 120);
+    var vMin = spReadNumber(content, "social_proof_viewers_min", 8);
+    var vMax = spReadNumber(content, "social_proof_viewers_max", 24);
+    if (vMax < vMin) vMax = vMin;
+
+    sp.ordersToday = baseOrders + spRandomInt(0, 9);
+    sp.viewers = spRandomInt(vMin, vMax);
+
+    // Nudge the browsing count a little over time so it feels alive.
+    setInterval(function () {
+      var delta = spRandomInt(-2, 2);
+      sp.viewers = Math.max(vMin, Math.min(vMax, sp.viewers + delta));
+    }, 20000);
+
+    el.spClose.addEventListener("click", spDismiss);
+
+    // Pause while the tab is hidden; resume when it comes back.
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "hidden") {
+        spHide();
+        clearTimeout(sp.timer);
+        sp.timer = null;
+      } else if (!sp.stopped) {
+        spScheduleNext(spRandomInt(3000, 6000));
+      }
+    });
+
+    spScheduleNext(4000);
   }
 
   // ---------------------------------------------------------------------
@@ -634,6 +807,9 @@
     if (cfg.content && typeof cfg.content === "object") {
       applyContent(cfg.content);
     }
+
+    // Start the simulated social-proof toast (uses cfg.content for ranges).
+    initSocialProof(cfg.content || {});
 
     var missing = cfg.missing || [];
     if (missing.length) {
