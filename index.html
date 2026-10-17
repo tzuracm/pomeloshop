@@ -19,8 +19,15 @@
 -->
 
 <link rel="stylesheet" href="/styles.css" />
+
+<!--
+  `config-pending` is removed by app.js once /api/config has been applied.
+  Until then styles.css hides the config-driven text (hero title/subtitle,
+  footer shop name) so a buyer never sees the hard-coded defaults flash
+  before the owner's real text arrives.
+-->
 </head>
-<body>
+<body class="config-pending">
 
   <!-- ===================== Header ===================== -->
   <header class="hero">

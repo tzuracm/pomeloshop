@@ -42,6 +42,27 @@ body {
   margin: 0 auto;
 }
 
+/* ---------- Config gating (prevents default-text flash) ---------- */
+/*
+ * index.html ships hard-coded fallback text, and app.js can only replace it
+ * after /api/config resolves (a network round trip). Without this, a buyer
+ * briefly sees the defaults — e.g. the title "Pomelo Shop" instead of the
+ * owner's configured title — on every page load.
+ *
+ * <body> starts with `config-pending`; app.js swaps it for `config-ready`
+ * once applyConfig() has written the real values. The fallback in config.js
+ * guarantees applyConfig() always runs, even if the fetch fails, and boot()
+ * has a timeout as a last resort, so this never leaves the page blank.
+ *
+ * `visibility` rather than `display` keeps the layout stable, so nothing
+ * jumps when the text appears.
+ */
+body.config-pending #shopName,
+body.config-pending #shopSubtitle,
+body.config-pending #footerShop {
+  visibility: hidden;
+}
+
 /* ---------- Header ---------- */
 .hero {
   text-align: center;

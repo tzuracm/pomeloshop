@@ -2,9 +2,14 @@
  * Pomelo Shop — application logic
  * ==========================================================================
  * Boot order:
- *   1. wait for window.__pomeloConfigReady (set by /config.js)
- *   2. build the Supabase client
- *   3. wire up the UI
+ *   1. wire up the UI and paint the static shell
+ *   2. wait for window.__pomeloConfigReady (set by /config.js)
+ *   3. apply the live config (text, catalogue, delivery, payment QR)
+ *
+ * Nothing config-driven is rendered before step 3. index.html ships
+ * <body class="config-pending"> and styles.css hides the hard-coded fallback
+ * text until applyConfig() swaps in `config-ready`, so buyers never see the
+ * defaults flash on load.
  *
  * Everything is plain ES5-compatible JS (no build step, no modules) so the
  * page works when opened directly from Vercel's static file server.
@@ -52,6 +57,10 @@
   var BUCKET = "pomelo-slips";
   var TABLE = "pomelo_orders";
   var MAX_SLIP_BYTES = 8 * 1024 * 1024; // 8 MB
+
+  // How long to wait for /api/config before falling back to the built-in
+  // defaults. Only matters when the request hangs rather than failing.
+  var CONFIG_TIMEOUT_MS = 6000;
 
   // ---------------------------------------------------------------------
   // 1. DOM refs
@@ -887,6 +896,24 @@
     el.submitBtn.addEventListener("click", submitOrder);
   }
 
+  /**
+   * Reveal the config-driven text.
+   *
+   * index.html starts with <body class="config-pending">, and styles.css hides
+   * #shopName / #shopSubtitle / #footerShop while that class is present. This
+   * is what stops the hard-coded defaults ("Pomelo Shop", "泰国金柚 …") from
+   * flashing on every load before /api/config resolves.
+   *
+   * Called from applyConfig() — which always runs, because config.js falls back
+   * to a default object when the fetch fails — so the text can never stay
+   * hidden.
+   */
+  function markConfigReady() {
+    if (!document.body) return;
+    document.body.classList.remove("config-pending");
+    document.body.classList.add("config-ready");
+  }
+
   // Apply owner-editable page text. Keys are seeded by the RBAC migration
   // (hero_title / hero_subtitle) and edited in /admin.html.
   function applyContent(content) {
@@ -925,9 +952,11 @@
         };
       });
       resetQty();
-      renderCatalogue();
-      refreshTotals();
     }
+    // Always render: boot() no longer paints the defaults, so this is the
+    // first (and normally only) catalogue render.
+    renderCatalogue();
+    refreshTotals();
 
     // Swap in the live delivery methods when the server returned any.
     if (Array.isArray(cfg.deliveryMethods) && cfg.deliveryMethods.length) {
@@ -940,13 +969,17 @@
           timeWindow: m.timeWindow || ""
         };
       });
-      renderDeliveryMethods();
     }
+    // Same reasoning as the catalogue: render once, from the live list.
+    renderDeliveryMethods();
 
     // Apply owner-editable page text (hero title / subtitle).
     if (cfg.content && typeof cfg.content === "object") {
       applyContent(cfg.content);
     }
+
+    // Config has been written to the DOM: reveal the gated text.
+    markConfigReady();
 
     // Start the simulated social-proof toast (uses cfg.content for ranges).
     initSocialProof(cfg.content || {});
@@ -1004,10 +1037,26 @@
 
   function boot() {
     loadBuyer();
-    renderCatalogue();
-    renderDeliveryMethods();
+    // Render the catalogue and delivery methods only once the live config is
+    // in. Rendering them here would paint DEFAULT_CATALOGUE /
+    // DEFAULT_DELIVERY_METHODS first, which is the same flash-of-defaults bug
+    // as the hero text. applyConfig() renders both when the server returns
+    // them; if it does not, the fallbacks below keep the page usable.
     wireEvents();
     refreshTotals();
+
+    // Safety net: if /api/config hangs (no response, no error), the promise
+    // never settles and the gated text would stay hidden forever. Reveal it
+    // after a few seconds so the page degrades to the built-in defaults
+    // instead of looking broken.
+    setTimeout(function () {
+      if (!document.body.classList.contains("config-ready")) {
+        console.warn("[pomelo] config did not resolve in time; showing defaults.");
+        renderCatalogue();
+        renderDeliveryMethods();
+        markConfigReady();
+      }
+    }, CONFIG_TIMEOUT_MS);
 
     var ready = window.__pomeloConfigReady || Promise.resolve(window.POMELO_CONFIG || {});
     ready.then(function (cfg) {
