@@ -260,6 +260,82 @@
     }
   }
 
+  /**
+   * Export the currently-filtered orders as a real .xlsx workbook.
+   *
+   * The endpoint is auth-protected, so we cannot simply navigate to it (the
+   * browser would not send the bearer token). Instead we fetch it as a blob
+   * and then either open it in a new tab ("inline") or save it ("download").
+   */
+  function exportOrders(mode) {
+    var status = el.orderStatusFilter.value;
+    var qs = "?mode=" + encodeURIComponent(mode);
+    if (status) qs += "&status=" + encodeURIComponent(status);
+
+    var btn = mode === "download" ? el.exportDownload : el.exportOpen;
+    var original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "生成中…";
+    hideAlert();
+
+    var headers = {};
+    if (state.session && state.session.access_token) {
+      headers.Authorization = "Bearer " + state.session.access_token;
+    }
+
+    fetch("/api/admin/orders-export" + qs, { headers: headers })
+      .then(function (res) {
+        if (res.status === 401) {
+          window.location.replace("/login.html");
+          throw new Error("登录已过期，请重新登录。");
+        }
+        if (!res.ok) {
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            throw new Error(data && data.error ? data.error : ("导出失败 (" + res.status + ")"));
+          });
+        }
+        return res.blob();
+      })
+      .then(function (blob) {
+        var stamp = new Date().toISOString().slice(0, 10);
+        var filename = "pomelo-orders" + (status ? "-" + status : "") + "-" + stamp + ".xlsx";
+        var url = URL.createObjectURL(blob);
+
+        if (mode === "download") {
+          var a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+          showAlert("ok", "Excel 已开始下载。");
+        } else {
+          // Open in a new tab. Browsers render .xlsx via their built-in viewer
+          // (or hand it to Excel / Numbers / Google Sheets).
+          var win = window.open(url, "_blank");
+          if (!win) {
+            // Popup blocked — fall back to a download.
+            var a2 = document.createElement("a");
+            a2.href = url;
+            a2.download = filename;
+            document.body.appendChild(a2);
+            a2.click();
+            document.body.removeChild(a2);
+            showAlert("ok", "弹窗被拦截，已改为下载 Excel。");
+          } else {
+            showAlert("ok", "已在新标签页打开 Excel。");
+          }
+          setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+        }
+      })
+      .catch(fail)
+      .then(function () {
+        btn.disabled = false;
+        btn.textContent = original;
+      });
+  }
+
   function onOrderSave(ev) {
     var btn = ev.currentTarget;
     var tr = btn.closest("tr");
@@ -609,6 +685,8 @@
 
     el.orderStatusFilter = $("orderStatusFilter");
     el.refreshOrders = $("refreshOrders");
+    el.exportOpen = $("exportOpen");
+    el.exportDownload = $("exportDownload");
     el.ordersBody = $("ordersBody");
 
     el.catSku = $("catSku");
@@ -644,6 +722,8 @@
 
     el.refreshOrders.addEventListener("click", loadOrders);
     el.orderStatusFilter.addEventListener("change", loadOrders);
+    el.exportOpen.addEventListener("click", function () { exportOrders("inline"); });
+    el.exportDownload.addEventListener("click", function () { exportOrders("download"); });
 
     el.catSave.addEventListener("click", onCatalogueSave);
     el.contentSave.addEventListener("click", onContentSave);
