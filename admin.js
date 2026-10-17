@@ -418,6 +418,7 @@
 
     el.catSku.value = item.sku;
     el.catSku.readOnly = true;
+    el.catSku.placeholder = "保存后自动生成";
     el.catLabel.value = item.label;
     el.catPrice.value = item.unit_price;
     el.catSort.value = item.sort_order;
@@ -440,26 +441,29 @@
   }
 
   function onCatalogueSave() {
+    var mode = el.catSave.getAttribute("data-mode") === "update" ? "PATCH" : "POST";
     var sku = el.catSku.value.trim();
     var label = el.catLabel.value.trim();
     var price = parseInt(el.catPrice.value, 10);
     var sort = parseInt(el.catSort.value, 10);
 
-    if (!sku || !label) { showAlert("error", "请填写 SKU 和名称。"); return; }
+    if (!label) { showAlert("error", "请填写商品名称。"); return; }
     if (!Number.isInteger(price) || price < 0) { showAlert("error", "单价必须是非负整数 (THB)。"); return; }
 
-    var mode = el.catSave.getAttribute("data-mode") === "update" ? "PATCH" : "POST";
-    var body = { sku: sku, label: label, unit_price: price };
+    // On create the server allocates the SKU code; on update it is the key.
+    var body = { label: label, unit_price: price };
+    if (mode === "PATCH") body.sku = sku;
     if (Number.isInteger(sort)) body.sort_order = sort;
 
     el.catSave.disabled = true;
     hideAlert();
 
     api("/api/admin/catalogue", { method: mode, body: body })
-      .then(function () {
+      .then(function (data) {
         el.catSave.disabled = false;
         resetCatalogueForm();
-        showAlert("ok", mode === "POST" ? "商品已创建。" : "商品已更新。");
+        var created = data && data.item && data.item.sku ? "（SKU: " + data.item.sku + "）" : "";
+        showAlert("ok", mode === "POST" ? "商品已创建" + created + "。" : "商品已更新。");
         loadCatalogue();
       })
       .catch(function (err) {
@@ -470,7 +474,8 @@
 
   function resetCatalogueForm() {
     el.catSku.value = "";
-    el.catSku.readOnly = false;
+    el.catSku.readOnly = true;
+    el.catSku.placeholder = "保存后自动生成";
     el.catLabel.value = "";
     el.catPrice.value = "";
     el.catSort.value = "";

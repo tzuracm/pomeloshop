@@ -232,10 +232,11 @@ create policy "catalogue_staff_write"
   using (public.is_admin_or_owner())
   with check (public.is_admin_or_owner());
 
--- Seed with the two SKUs currently hard-coded in app.js.
+-- Seed with the two products currently hard-coded in app.js.
+-- SKU codes are canonical: POM-<SIZE>-<NNN> (see 0003_pomelo_sku_codes.sql).
 insert into public.pomelo_catalogue (sku, label, unit_price, sort_order) values
-  ('5kg',  '5 kg 装',  180, 1),
-  ('10kg', '10 kg 装', 330, 2)
+  ('POM-5KG-001',  '5 kg 装',  180, 1),
+  ('POM-10KG-001', '10 kg 装', 330, 2)
 on conflict (sku) do nothing;
 
 -- -----------------------------------------------------------------------------

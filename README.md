@@ -41,6 +41,7 @@ Open your Supabase project → **SQL Editor** → run the migrations **in order*
 
 1. [`supabase/migrations/0001_pomelo_orders.sql`](supabase/migrations/0001_pomelo_orders.sql)
 2. [`supabase/migrations/0002_pomelo_rbac.sql`](supabase/migrations/0002_pomelo_rbac.sql)
+3. [`supabase/migrations/0003_pomelo_sku_codes.sql`](supabase/migrations/0003_pomelo_sku_codes.sql)
 
 Migration `0001` creates:
 
@@ -145,7 +146,8 @@ pomelo-shop/
 ├── supabase/
 │   └── migrations/
 │       ├── 0001_pomelo_orders.sql
-│       └── 0002_pomelo_rbac.sql
+│       ├── 0002_pomelo_rbac.sql
+│       └── 0003_pomelo_sku_codes.sql
 ├── plans/
 │   └── rbac-design.md         # RBAC design notes
 ├── vercel.json
@@ -188,7 +190,11 @@ The live catalogue and page text are stored in Supabase and served through
 **without a redeploy**:
 
 - **Catalogue** → the **商品** tab (admin/owner). Rows live in
-  `pomelo_catalogue`; `unit_price` is in **THB**.
+  `pomelo_catalogue`; `unit_price` is in **THB**. To add a product, fill in the
+  name, price and sort order — the **SKU code is generated automatically** by
+  [`api/admin/catalogue.js`](api/admin/catalogue.js) in the canonical form
+  `POM-<SIZE>-<NNN>` (e.g. `POM-5KG-001`). SKU codes are immutable once
+  created, so historical order line items keep resolving.
 - **Page text** → the **页面文字** tab (owner). Keys `hero_title` /
   `hero_subtitle` live in `pomelo_page_content`.
 
@@ -252,6 +258,7 @@ In the **new** project → **SQL Editor**, run the migrations **in order**:
 
 1. [`supabase/migrations/0001_pomelo_orders.sql`](supabase/migrations/0001_pomelo_orders.sql)
 2. [`supabase/migrations/0002_pomelo_rbac.sql`](supabase/migrations/0002_pomelo_rbac.sql)
+3. [`supabase/migrations/0003_pomelo_sku_codes.sql`](supabase/migrations/0003_pomelo_sku_codes.sql)
 
 Both are idempotent (`create table if not exists`, `drop policy if exists`), so
 re-running them is safe.

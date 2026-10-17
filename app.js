@@ -21,8 +21,8 @@
   //    floating-point rounding creeps into the stored total.
   // ---------------------------------------------------------------------
   var DEFAULT_CATALOGUE = [
-    { sku: "5kg",  label: "5 kg 装",  unitPrice: 180 },
-    { sku: "10kg", label: "10 kg 装", unitPrice: 330 }
+    { sku: "POM-5KG-001",  label: "5 kg 装",  unitPrice: 180 },
+    { sku: "POM-10KG-001", label: "10 kg 装", unitPrice: 330 }
   ];
 
   // Mutable working copy — replaced by the live catalogue once config loads.
