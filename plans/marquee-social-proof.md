@@ -5,8 +5,11 @@
 > [`styles.css`](styles.css:449) 的 `.sp-toast`、
 > [`app.js`](app.js:671) 的 `initSocialProof()`。
 > 可调参数在 [`admin.js`](admin.js:26) 的 `CONTENT_KEYS`（`social_proof_orders_base`、
-> `social_proof_viewers_min`、`social_proof_viewers_max`），保存于 `pomelo_page_content`。
-> 未新增 `/api/stats`，也未读取真实订单。
+> `social_proof_orders_daily_max`、`social_proof_viewers_min`、`social_proof_viewers_max`），
+> 保存于 `pomelo_page_content`。未新增 `/api/stats`，也未读取真实订单。
+>
+> **每日上限**：`social_proof_orders_daily_max` 限制「今天已售出」显示的最大值，
+> 超出时自动截断；填 `0` 表示不限制。见 [`app.js`](app.js:706) 的 `initSocialProof()`。
 
 目标：在柚子下单页面加入「多少人已下单 / 多少人正在浏览」的滚动提示，提升转化。
 

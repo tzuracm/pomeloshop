@@ -715,7 +715,12 @@
     var vMax = spReadNumber(content, "social_proof_viewers_max", 24);
     if (vMax < vMin) vMax = vMin;
 
+    // Daily cap: the "sold today" figure never exceeds this. 0 = no cap.
+    var dailyMax = spReadNumber(content, "social_proof_orders_daily_max", 0);
     sp.ordersToday = baseOrders + spRandomInt(0, 9);
+    if (dailyMax > 0) {
+      sp.ordersToday = Math.min(sp.ordersToday, dailyMax);
+    }
     sp.viewers = spRandomInt(vMin, vMax);
 
     // Nudge the browsing count a little over time so it feels alive.

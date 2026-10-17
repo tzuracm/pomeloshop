@@ -24,6 +24,7 @@
     { key: "hero_title", label: "主标题" },
     { key: "hero_subtitle", label: "副标题" },
     { key: "social_proof_orders_base", label: "跑马灯 · 今日已售基数（数字）" },
+    { key: "social_proof_orders_daily_max", label: "跑马灯 · 今日已售上限（数字，0 = 不限制）" },
     { key: "social_proof_viewers_min", label: "跑马灯 · 浏览人数下限（数字）" },
     { key: "social_proof_viewers_max", label: "跑马灯 · 浏览人数上限（数字）" }
   ];
