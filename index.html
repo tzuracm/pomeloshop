@@ -66,22 +66,13 @@
       </div>
     </section>
 
-    <!-- Step 2 — fulfilment -->
+    <!-- Step 2 — delivery method (交货方式) -->
     <section class="card">
-      <h2><span class="step">2</span> 履约方式</h2>
-      <div class="segmented">
-        <input type="radio" name="fulfilment" id="fSelf" value="self_pickup" checked />
-        <label for="fSelf">
-          自提
-          <small>Self-Pickup</small>
-        </label>
-
-        <input type="radio" name="fulfilment" id="fGrab" value="grab_cod" />
-        <label for="fGrab">
-          Grab 到付
-          <small>Delivery on Delivery</small>
-        </label>
+      <h2><span class="step">2</span> 交货方式</h2>
+      <div class="segmented" id="deliveryMethods">
+        <!-- Options are rendered from /api/config (pomelo_delivery_methods). -->
       </div>
+      <div class="delivery-details" id="deliveryDetails"></div>
     </section>
 
     <!-- Step 3 — catalogue -->
@@ -141,7 +132,7 @@
     <div class="tick">✓</div>
     <h2>下单成功！</h2>
     <p>我们已收到你的订单与转账凭证。</p>
-    <p>确认收款后会尽快安排发货 / 自提通知。</p>
+    <p>确认收款后会尽快按所选交货方式与你联系。</p>
     <div class="ref" id="orderRef"></div>
   </section>
 

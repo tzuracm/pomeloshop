@@ -26,9 +26,10 @@ const STATUS_LABEL = {
   cancelled: "已取消",
 };
 
+/** Fallback labels for method codes that no longer exist in the table. */
 const FULFILMENT_LABEL = {
-  self_pickup: "自取",
-  grab_cod: "Grab 货到付款",
+  self_pickup: "自提",
+  grab_cod: "Grab 到付",
 };
 
 function handler(req, res) {
@@ -61,7 +62,19 @@ async function exportOrders(req, res) {
   if (error) throw new HttpError(500, "Failed to load orders: " + error.message);
 
   const orders = data || [];
-  const xlsx = buildWorkbook(orders, status);
+
+  // Resolve delivery-method labels from the live table so renamed/added
+  // methods export with their current name. Codes missing from the table
+  // (e.g. a deleted method on an old order) fall back to the built-in map.
+  const labels = { ...FULFILMENT_LABEL };
+  const { data: methods } = await admin
+    .from("pomelo_delivery_methods")
+    .select("code, label");
+  for (const m of methods || []) {
+    if (m.code && m.label) labels[m.code] = m.label;
+  }
+
+  const xlsx = buildWorkbook(orders, status, labels);
 
   const stamp = new Date().toISOString().slice(0, 10);
   const suffix = status ? "-" + status : "";
@@ -84,18 +97,21 @@ async function exportOrders(req, res) {
 // Workbook construction
 // ---------------------------------------------------------------------------
 
-const COLUMNS = [
-  { header: "订单号", width: 38, value: (o) => String(o.id || "") },
-  { header: "下单时间", width: 20, value: (o) => fmtDateTime(o.created_at) },
-  { header: "客户微信名", width: 18, value: (o) => o.wechat_name || "" },
-  { header: "电话", width: 16, value: (o) => o.phone || "" },
-  { header: "取货方式", width: 16, value: (o) => FULFILMENT_LABEL[o.fulfilment] || o.fulfilment || "" },
-  { header: "商品明细", width: 40, value: (o) => itemsText(o.items) },
-  { header: "总金额 (THB)", width: 14, numeric: true, value: (o) => (Number(o.total_satang) || 0) / 100 },
-  { header: "状态", width: 12, value: (o) => STATUS_LABEL[o.status] || o.status || "" },
-  { header: "备注", width: 30, value: (o) => o.note || "" },
-  { header: "水单链接", width: 50, value: (o) => o.slip_url || "" },
-];
+/** Build the column definitions, closing over the resolved label map. */
+function buildColumns(labels) {
+  return [
+    { header: "订单号", width: 38, value: (o) => String(o.id || "") },
+    { header: "下单时间", width: 20, value: (o) => fmtDateTime(o.created_at) },
+    { header: "客户微信名", width: 18, value: (o) => o.wechat_name || "" },
+    { header: "电话", width: 16, value: (o) => o.phone || "" },
+    { header: "交货方式", width: 16, value: (o) => labels[o.fulfilment] || o.fulfilment || "" },
+    { header: "商品明细", width: 40, value: (o) => itemsText(o.items) },
+    { header: "总金额 (THB)", width: 14, numeric: true, value: (o) => (Number(o.total_satang) || 0) / 100 },
+    { header: "状态", width: 12, value: (o) => STATUS_LABEL[o.status] || o.status || "" },
+    { header: "备注", width: 30, value: (o) => o.note || "" },
+    { header: "水单链接", width: 50, value: (o) => o.slip_url || "" },
+  ];
+}
 
 function itemsText(items) {
   if (!Array.isArray(items)) return "";
@@ -121,9 +137,9 @@ function fmtDateTime(iso) {
   );
 }
 
-function buildWorkbook(orders, statusFilter) {
+function buildWorkbook(orders, statusFilter, labels) {
   const sheetName = statusFilter ? `订单-${statusFilter}` : "订单";
-  const sheetXml = buildSheetXml(orders);
+  const sheetXml = buildSheetXml(orders, buildColumns(labels || FULFILMENT_LABEL));
   const files = {
     "[Content_Types].xml": contentTypesXml(),
     "_rels/.rels": rootRelsXml(),
@@ -165,23 +181,23 @@ function colLetter(index) {
   return s;
 }
 
-function buildSheetXml(orders) {
-  const lastCol = colLetter(COLUMNS.length - 1);
+function buildSheetXml(orders, columns) {
+  const lastCol = colLetter(columns.length - 1);
   const lastRow = orders.length + 1;
 
-  const cols = COLUMNS.map((c, i) => {
+  const cols = columns.map((c, i) => {
     const n = i + 1;
     return `<col min="${n}" max="${n}" width="${c.width}" customWidth="1"/>`;
   }).join("");
 
-  const headerCells = COLUMNS.map((c, i) => {
+  const headerCells = columns.map((c, i) => {
     const ref = colLetter(i) + "1";
     return `<c r="${ref}" s="1" t="inlineStr"><is><t>${xmlEscape(c.header)}</t></is></c>`;
   }).join("");
 
   const rows = orders.map((o, ri) => {
     const rowNum = ri + 2;
-    const cells = COLUMNS.map((c, ci) => {
+    const cells = columns.map((c, ci) => {
       const ref = colLetter(ci) + rowNum;
       const raw = c.value(o);
       if (c.numeric) {

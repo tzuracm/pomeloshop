@@ -11,12 +11,13 @@
  *   - shopName         : display name
  *   - catalogue        : active products (from pomelo_catalogue)
  *   - content          : editable page text (from pomelo_page_content)
+ *   - deliveryMethods  : active delivery methods (from pomelo_delivery_methods)
  *
- * The catalogue and page text are read from Supabase so the owner can edit
- * them in /admin.html without a redeploy. Both tables are public-read, so the
- * anon key is sufficient. If the RBAC migration (0002) has not been applied
- * yet, these reads fail silently and the client falls back to its built-in
- * defaults.
+ * The catalogue, page text and delivery methods are read from Supabase so the
+ * owner can edit them in /admin.html without a redeploy. All three tables are
+ * public-read, so the anon key is sufficient. If the RBAC migration (0002) has
+ * not been applied yet, these reads fail silently and the client falls back to
+ * its built-in defaults.
  *
  * The `service_role` key is never referenced here and must never be added to
  * this project's environment.
@@ -51,6 +52,7 @@ export default async function handler(req, res) {
     shopName: process.env.SHOP_NAME || "Pomelo Shop",
     catalogue: [],
     content: {},
+    deliveryMethods: [],
   };
 
   // Pull the live catalogue + page text when Supabase is configured.
@@ -59,19 +61,36 @@ export default async function handler(req, res) {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const [items, settings, content] = await Promise.all([
+    const [items, settings, content, methods] = await Promise.all([
       safeSelect(supabase, "pomelo_catalogue", "sku, label, unit_price, sort_order, active", {
         column: "sort_order",
         ascending: true,
       }),
       safeSelect(supabase, "pomelo_settings", "key, value", null),
       safeSelect(supabase, "pomelo_page_content", "key, value", null),
+      safeSelect(
+        supabase,
+        "pomelo_delivery_methods",
+        "code, label, description, map_url, time_window, sort_order, active",
+        { column: "sort_order", ascending: true }
+      ),
     ]);
 
     // Only expose active items, in the shape the storefront expects.
     config.catalogue = items
       .filter((it) => it.active !== false)
       .map((it) => ({ sku: it.sku, label: it.label, unitPrice: it.unit_price }));
+
+    // Only expose active delivery methods, in the shape the storefront expects.
+    config.deliveryMethods = methods
+      .filter((m) => m.active !== false)
+      .map((m) => ({
+        code: m.code,
+        label: m.label,
+        description: m.description || "",
+        mapUrl: m.map_url || "",
+        timeWindow: m.time_window || "",
+      }));
 
     // A settings row overrides the env fallback for promptpay_id.
     for (const row of settings) {

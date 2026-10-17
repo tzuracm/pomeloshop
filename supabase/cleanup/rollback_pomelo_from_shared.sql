@@ -32,6 +32,7 @@ drop table if exists public.pomelo_orders      cascade;
 drop table if exists public.pomelo_settings    cascade;
 drop table if exists public.pomelo_catalogue   cascade;
 drop table if exists public.pomelo_page_content cascade;
+drop table if exists public.pomelo_delivery_methods cascade;
 
 -- -----------------------------------------------------------------------------
 -- 2. Pomelo-only policies on the SHARED profiles table
@@ -131,6 +132,8 @@ union all
 select 'pomelo_catalogue',   count(*) from information_schema.tables where table_schema = 'public' and table_name = 'pomelo_catalogue'
 union all
 select 'pomelo_page_content',count(*) from information_schema.tables where table_schema = 'public' and table_name = 'pomelo_page_content'
+union all
+select 'pomelo_delivery_methods',count(*) from information_schema.tables where table_schema = 'public' and table_name = 'pomelo_delivery_methods'
 union all
 select 'is_owner()',         count(*) from pg_proc where proname = 'is_owner'
 union all

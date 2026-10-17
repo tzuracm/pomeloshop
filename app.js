@@ -28,6 +28,26 @@
   // Mutable working copy — replaced by the live catalogue once config loads.
   var CATALOGUE = DEFAULT_CATALOGUE.slice();
 
+  // ---------------------------------------------------------------------
+  // 0b. Delivery methods (交货方式) — DEFAULT fallback only.
+  //     The live list is loaded from /api/config (backed by the
+  //     pomelo_delivery_methods table) so admins can add/remove methods in
+  //     /admin.html without a redeploy. `mapUrl` and `timeWindow` are shown
+  //     under the selected option (used by 自提 / pickup).
+  // ---------------------------------------------------------------------
+  var DEFAULT_DELIVERY_METHODS = [
+    {
+      code: "self_pickup",
+      label: "自提",
+      description: "Self-Pickup",
+      mapUrl: "",
+      timeWindow: ""
+    }
+  ];
+
+  // Mutable working copy — replaced by the live list once config loads.
+  var DELIVERY_METHODS = DEFAULT_DELIVERY_METHODS.slice();
+
   var STORAGE_KEY = "pomelo_shop_buyer_v1";
   var BUCKET = "pomelo-slips";
   var TABLE = "pomelo_orders";
@@ -46,6 +66,8 @@
     formAlert:   $("formAlert"),
     wechatName:  $("wechatName"),
     phone:       $("phone"),
+    deliveryMethods: $("deliveryMethods"),
+    deliveryDetails: $("deliveryDetails"),
     catalogue:   $("catalogue"),
     totalAmount: $("totalAmount"),
     qrFrame:     $("qrFrame"),
@@ -327,9 +349,79 @@
       });
   }
 
-  function fulfilmentValue() {
+  // ---------------------------------------------------------------------
+  // 9b. Delivery methods (交货方式)
+  // ---------------------------------------------------------------------
+  function findMethod(code) {
+    for (var i = 0; i < DELIVERY_METHODS.length; i++) {
+      if (DELIVERY_METHODS[i].code === code) return DELIVERY_METHODS[i];
+    }
+    return null;
+  }
+
+  function selectedMethodCode() {
     var checked = document.querySelector('input[name="fulfilment"]:checked');
-    return checked ? checked.value : "self_pickup";
+    if (checked) return checked.value;
+    return DELIVERY_METHODS.length ? DELIVERY_METHODS[0].code : "";
+  }
+
+  function renderDeliveryMethods() {
+    if (!el.deliveryMethods) return;
+
+    if (!DELIVERY_METHODS.length) {
+      el.deliveryMethods.innerHTML =
+        '<p class="muted">暂无可用交货方式，请联系卖家。</p>';
+      el.deliveryDetails.innerHTML = "";
+      return;
+    }
+
+    var current = selectedMethodCode();
+    var known = !!findMethod(current);
+    if (!known) current = DELIVERY_METHODS[0].code;
+
+    el.deliveryMethods.innerHTML = DELIVERY_METHODS.map(function (m) {
+      var id = "fm-" + m.code;
+      return (
+        '<input type="radio" name="fulfilment" id="' + escapeHtml(id) + '"' +
+          ' value="' + escapeHtml(m.code) + '"' +
+          (m.code === current ? " checked" : "") + " />" +
+        '<label for="' + escapeHtml(id) + '">' +
+          escapeHtml(m.label) +
+          (m.description ? "<small>" + escapeHtml(m.description) + "</small>" : "") +
+        "</label>"
+      );
+    }).join("");
+
+    renderDeliveryDetails();
+  }
+
+  function renderDeliveryDetails() {
+    if (!el.deliveryDetails) return;
+    var m = findMethod(selectedMethodCode());
+    if (!m) { el.deliveryDetails.innerHTML = ""; return; }
+
+    var parts = [];
+    if (m.timeWindow) {
+      parts.push(
+        '<div class="delivery-row"><span class="k">取货时间</span>' +
+          '<span class="v">' + escapeHtml(m.timeWindow) + "</span></div>"
+      );
+    }
+    if (m.mapUrl) {
+      parts.push(
+        '<div class="delivery-row"><span class="k">取货地点</span>' +
+          '<a class="v" href="' + escapeHtml(m.mapUrl) + '" target="_blank" rel="noopener">' +
+            "在 Google Maps 中查看 ↗</a></div>"
+      );
+    }
+
+    el.deliveryDetails.innerHTML = parts.length
+      ? '<div class="delivery-info">' + parts.join("") + "</div>"
+      : "";
+  }
+
+  function fulfilmentValue() {
+    return selectedMethodCode();
   }
 
   function extOf(file) {
@@ -449,6 +541,12 @@
     el.wechatName.addEventListener("input", updateSubmitState);
     el.phone.addEventListener("input", updateSubmitState);
 
+    if (el.deliveryMethods) {
+      el.deliveryMethods.addEventListener("change", function (ev) {
+        if (ev.target && ev.target.name === "fulfilment") renderDeliveryDetails();
+      });
+    }
+
     el.slipInput.addEventListener("change", function (ev) {
       setSlip(ev.target.files && ev.target.files[0]);
     });
@@ -518,6 +616,20 @@
       renderCatalogue();
     }
 
+    // Swap in the live delivery methods when the server returned any.
+    if (Array.isArray(cfg.deliveryMethods) && cfg.deliveryMethods.length) {
+      DELIVERY_METHODS = cfg.deliveryMethods.map(function (m) {
+        return {
+          code: m.code,
+          label: m.label,
+          description: m.description || "",
+          mapUrl: m.mapUrl || "",
+          timeWindow: m.timeWindow || ""
+        };
+      });
+      renderDeliveryMethods();
+    }
+
     // Apply owner-editable page text (hero title / subtitle).
     if (cfg.content && typeof cfg.content === "object") {
       applyContent(cfg.content);
@@ -546,6 +658,7 @@
   function boot() {
     loadBuyer();
     renderCatalogue();
+    renderDeliveryMethods();
     wireEvents();
     refreshTotals();
 

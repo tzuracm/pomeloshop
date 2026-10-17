@@ -102,6 +102,7 @@
   <nav class="tabs" id="tabs">
     <button class="tab active" data-tab="orders">订单</button>
     <button class="tab" data-tab="catalogue" data-min="admin">商品</button>
+    <button class="tab" data-tab="delivery" data-min="admin">交货方式</button>
     <button class="tab" data-tab="content" data-min="owner">页面文字</button>
     <button class="tab" data-tab="settings" data-min="user">敏感设置</button>
     <button class="tab" data-tab="users" data-min="owner">员工与权限</button>
@@ -146,6 +147,27 @@
         <div style="align-self:end;"><button class="btn" id="catSave">保存商品</button></div>
       </div>
       <div id="catalogueBody"><div class="empty">加载中…</div></div>
+    </div>
+  </section>
+
+  <!-- ===================== Delivery methods ===================== -->
+  <section class="panel" id="panel-delivery">
+    <div class="card">
+      <h2>交货方式</h2>
+      <p class="readonly-note">
+        这里配置买家下单时可选的方式（例如「自提」）。停用的方式不再展示给买家，
+        但历史订单仍保留原记录。
+      </p>
+      <div class="form-grid">
+        <div><label for="dmCode">代码</label><input type="text" id="dmCode" placeholder="保存后自动生成" readonly /></div>
+        <div><label for="dmLabel">名称</label><input type="text" id="dmLabel" placeholder="自提" /></div>
+        <div><label for="dmDescription">副标题</label><input type="text" id="dmDescription" placeholder="Self-Pickup" /></div>
+        <div><label for="dmTimeWindow">取货时间窗口</label><input type="text" id="dmTimeWindow" placeholder="每天 10:00–18:00" /></div>
+        <div><label for="dmMapUrl">Google Maps 链接</label><input type="text" id="dmMapUrl" placeholder="https://maps.app.goo.gl/…" /></div>
+        <div><label for="dmSort">排序</label><input type="number" id="dmSort" step="1" placeholder="1" /></div>
+        <div style="align-self:end;"><button class="btn" id="dmSave">保存方式</button></div>
+      </div>
+      <div id="deliveryBody"><div class="empty">加载中…</div></div>
     </div>
   </section>
 

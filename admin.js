@@ -41,6 +41,7 @@
     activeTab: "orders",
     orders: [],
     catalogue: [],
+    deliveryMethods: [],
     content: {},
     settings: {},
     users: []
@@ -176,6 +177,7 @@
     // Lazy-load the panel's data on first view.
     if (name === "orders") loadOrders();
     else if (name === "catalogue") loadCatalogue();
+    else if (name === "delivery") loadDeliveryMethods();
     else if (name === "content") loadContent();
     else if (name === "settings") loadSettings();
     else if (name === "users") loadUsers();
@@ -190,15 +192,35 @@
     var status = el.orderStatusFilter.value;
     var qs = status ? ("?status=" + encodeURIComponent(status)) : "";
 
-    api("/api/admin/orders" + qs)
+    // Load the delivery-method labels alongside the orders so the table shows
+    // "自提" rather than the raw code. A failure here must not block orders.
+    var labelsReady = api("/api/admin/delivery-methods")
       .then(function (data) {
-        state.orders = data.orders || [];
+        state.deliveryMethods = data.methods || [];
+      })
+      .catch(function () {
+        state.deliveryMethods = [];
+      });
+
+    Promise.all([api("/api/admin/orders" + qs), labelsReady])
+      .then(function (results) {
+        state.orders = results[0].orders || [];
         renderOrders();
       })
       .catch(function (err) {
         el.ordersBody.innerHTML = '<div class="empty">加载失败</div>';
         fail(err);
       });
+  }
+
+  /** Human-readable label for a delivery-method code, with a safe fallback. */
+  function fulfilmentLabel(code) {
+    if (!code) return "—";
+    var m = findDeliveryMethod(code);
+    if (m && m.label) return m.label;
+    if (code === "self_pickup") return "自提";
+    if (code === "grab_cod") return "Grab 到付";
+    return code;
   }
 
   function renderOrders() {
@@ -230,7 +252,7 @@
           '<td class="mono">' + escapeHtml(String(o.id).slice(0, 8)) + "</td>" +
           "<td>" + escapeHtml(o.wechat_name || "—") + "<br><span class=\"muted\">" + escapeHtml(o.phone || "") + "</span></td>" +
           "<td>" + (itemsText || '<span class="muted">—</span>') + "</td>" +
-          "<td>" + escapeHtml(o.fulfilment || "—") + "</td>" +
+          "<td>" + escapeHtml(fulfilmentLabel(o.fulfilment)) + "</td>" +
           '<td class="mono">฿' + thb(o.total_satang) + "</td>" +
           "<td>" + slip + "</td>" +
           "<td>" + fmtDate(o.created_at) + "</td>" +
@@ -252,7 +274,7 @@
     el.ordersBody.innerHTML =
       hint +
       "<table><thead><tr>" +
-        "<th>ID</th><th>客户</th><th>商品</th><th>方式</th><th>金额</th><th>水单</th><th>下单时间</th><th>操作</th>" +
+        "<th>ID</th><th>客户</th><th>商品</th><th>交货方式</th><th>金额</th><th>水单</th><th>下单时间</th><th>操作</th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table>";
 
     // Wire per-row save buttons.
@@ -486,6 +508,165 @@
   }
 
   // --------------------------------------------------------------------------
+  // Delivery methods (交货方式)
+  // --------------------------------------------------------------------------
+
+  function loadDeliveryMethods() {
+    el.deliveryBody.innerHTML = '<div class="empty">加载中…</div>';
+    api("/api/admin/delivery-methods")
+      .then(function (data) {
+        state.deliveryMethods = data.methods || [];
+        renderDeliveryMethods();
+      })
+      .catch(function (err) {
+        el.deliveryBody.innerHTML = '<div class="empty">加载失败</div>';
+        fail(err);
+      });
+  }
+
+  function renderDeliveryMethods() {
+    if (!state.deliveryMethods.length) {
+      el.deliveryBody.innerHTML = '<div class="empty">暂无交货方式</div>';
+      return;
+    }
+
+    var rows = state.deliveryMethods.map(function (m) {
+      var map = m.map_url
+        ? '<a class="slip-link" href="' + escapeHtml(m.map_url) + '" target="_blank" rel="noopener">打开地图</a>'
+        : '<span class="muted">—</span>';
+      return (
+        '<tr data-code="' + escapeHtml(m.code) + '">' +
+          '<td class="mono">' + escapeHtml(m.code) + "</td>" +
+          "<td>" + escapeHtml(m.label) +
+            (m.description ? '<br><span class="muted">' + escapeHtml(m.description) + "</span>" : "") +
+          "</td>" +
+          "<td>" + (m.time_window ? escapeHtml(m.time_window) : '<span class="muted">—</span>') + "</td>" +
+          "<td>" + map + "</td>" +
+          "<td>" + escapeHtml(m.sort_order) + "</td>" +
+          "<td>" + (m.active ? "是" : "否") + "</td>" +
+          '<td><div class="row-actions">' +
+            '<button class="btn secondary dm-edit">编辑</button>' +
+            '<button class="btn secondary dm-toggle">' + (m.active ? "停用" : "启用") + "</button>" +
+            '<button class="btn danger dm-del">删除</button>' +
+          "</div></td>" +
+        "</tr>"
+      );
+    }).join("");
+
+    el.deliveryBody.innerHTML =
+      "<table><thead><tr>" +
+        "<th>代码</th><th>名称</th><th>取货时间</th><th>地图</th><th>排序</th><th>启用</th><th>操作</th>" +
+      "</tr></thead><tbody>" + rows + "</tbody></table>";
+
+    var edits = el.deliveryBody.querySelectorAll(".dm-edit");
+    for (var i = 0; i < edits.length; i++) edits[i].addEventListener("click", onDeliveryEdit);
+
+    var toggles = el.deliveryBody.querySelectorAll(".dm-toggle");
+    for (var j = 0; j < toggles.length; j++) toggles[j].addEventListener("click", onDeliveryToggle);
+
+    var dels = el.deliveryBody.querySelectorAll(".dm-del");
+    for (var k = 0; k < dels.length; k++) dels[k].addEventListener("click", onDeliveryDelete);
+  }
+
+  function findDeliveryMethod(code) {
+    for (var i = 0; i < state.deliveryMethods.length; i++) {
+      if (state.deliveryMethods[i].code === code) return state.deliveryMethods[i];
+    }
+    return null;
+  }
+
+  function onDeliveryEdit(ev) {
+    var code = ev.currentTarget.closest("tr").getAttribute("data-code");
+    var m = findDeliveryMethod(code);
+    if (!m) return;
+
+    el.dmCode.value = m.code;
+    el.dmLabel.value = m.label || "";
+    el.dmDescription.value = m.description || "";
+    el.dmTimeWindow.value = m.time_window || "";
+    el.dmMapUrl.value = m.map_url || "";
+    el.dmSort.value = m.sort_order;
+    el.dmSave.textContent = "更新方式";
+    el.dmSave.setAttribute("data-mode", "update");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function onDeliveryToggle(ev) {
+    var code = ev.currentTarget.closest("tr").getAttribute("data-code");
+    var m = findDeliveryMethod(code);
+    if (!m) return;
+
+    hideAlert();
+    api("/api/admin/delivery-methods", {
+      method: "PATCH",
+      body: { code: code, active: !m.active }
+    })
+      .then(function () {
+        showAlert("ok", m.active ? "已停用该交货方式。" : "已启用该交货方式。");
+        loadDeliveryMethods();
+      })
+      .catch(fail);
+  }
+
+  function onDeliveryDelete(ev) {
+    var code = ev.currentTarget.closest("tr").getAttribute("data-code");
+    if (!window.confirm("确定删除交货方式 " + code + " 吗？历史订单不受影响。")) return;
+
+    hideAlert();
+    api("/api/admin/delivery-methods", { method: "DELETE", body: { code: code } })
+      .then(function () {
+        showAlert("ok", "交货方式已删除。");
+        loadDeliveryMethods();
+      })
+      .catch(fail);
+  }
+
+  function onDeliverySave() {
+    var mode = el.dmSave.getAttribute("data-mode") === "update" ? "PATCH" : "POST";
+    var code = el.dmCode.value.trim();
+    var label = el.dmLabel.value.trim();
+    var sort = parseInt(el.dmSort.value, 10);
+
+    if (!label) { showAlert("error", "请填写交货方式名称。"); return; }
+
+    var body = {
+      label: label,
+      description: el.dmDescription.value.trim(),
+      time_window: el.dmTimeWindow.value.trim(),
+      map_url: el.dmMapUrl.value.trim()
+    };
+    if (mode === "PATCH") body.code = code;
+    if (Number.isInteger(sort)) body.sort_order = sort;
+
+    el.dmSave.disabled = true;
+    hideAlert();
+
+    api("/api/admin/delivery-methods", { method: mode, body: body })
+      .then(function (data) {
+        el.dmSave.disabled = false;
+        resetDeliveryForm();
+        var created = data && data.method && data.method.code ? "（代码: " + data.method.code + "）" : "";
+        showAlert("ok", mode === "POST" ? "交货方式已创建" + created + "。" : "交货方式已更新。");
+        loadDeliveryMethods();
+      })
+      .catch(function (err) {
+        el.dmSave.disabled = false;
+        fail(err);
+      });
+  }
+
+  function resetDeliveryForm() {
+    el.dmCode.value = "";
+    el.dmLabel.value = "";
+    el.dmDescription.value = "";
+    el.dmTimeWindow.value = "";
+    el.dmMapUrl.value = "";
+    el.dmSort.value = "";
+    el.dmSave.textContent = "保存方式";
+    el.dmSave.removeAttribute("data-mode");
+  }
+
+  // --------------------------------------------------------------------------
   // Page content (owner)
   // --------------------------------------------------------------------------
 
@@ -703,6 +884,15 @@
     el.catSave = $("catSave");
     el.catalogueBody = $("catalogueBody");
 
+    el.dmCode = $("dmCode");
+    el.dmLabel = $("dmLabel");
+    el.dmDescription = $("dmDescription");
+    el.dmTimeWindow = $("dmTimeWindow");
+    el.dmMapUrl = $("dmMapUrl");
+    el.dmSort = $("dmSort");
+    el.dmSave = $("dmSave");
+    el.deliveryBody = $("deliveryBody");
+
     el.contentBody = $("contentBody");
     el.contentSave = $("contentSave");
 
@@ -733,6 +923,7 @@
     el.exportDownload.addEventListener("click", function () { exportOrders("download"); });
 
     el.catSave.addEventListener("click", onCatalogueSave);
+    el.dmSave.addEventListener("click", onDeliverySave);
     el.contentSave.addEventListener("click", onContentSave);
     el.settingsSave.addEventListener("click", onSettingsSave);
   }

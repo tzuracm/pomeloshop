@@ -159,6 +159,38 @@ input.invalid { border-color: var(--err); }
 .segmented input:focus-visible + label {
   box-shadow: 0 0 0 3px rgba(247,181,0,.25);
 }
+/* Single option: don't stretch it across two columns. */
+.segmented:has(> input:only-of-type) { grid-template-columns: 1fr; }
+
+/* ---------- Delivery details (pickup time window / map link) ---------- */
+.delivery-details:empty { display: none; }
+.delivery-info {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: #fffdf9;
+  font-size: 13px;
+}
+.delivery-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0;
+}
+.delivery-row .k {
+  flex: none;
+  min-width: 64px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.delivery-row .v { color: var(--ink); font-weight: 600; }
+a.delivery-row .v,
+.delivery-row a.v {
+  color: var(--brand-ink);
+  text-decoration: underline;
+  font-weight: 600;
+}
 
 /* ---------- Catalogue rows ---------- */
 .sku {
