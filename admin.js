@@ -1274,12 +1274,13 @@
    * Owner-only: provision a new staff account (public sign-up is disabled).
    * The email is the login identity; the server assigns the bootstrap password
    * (123456) and flags the account so the holder must change it on first login.
+   * New accounts always start as "pending" — the owner activates them from the
+   * list below, so there is no status choice at creation time.
    */
   function onCreateUser() {
     var email = el.newUserEmail.value.trim();
     var fullName = el.newUserName.value.trim();
     var role = el.newUserRole.value;
-    var status = el.newUserStatus.value;
 
     if (!email) { showAlert("error", "请填写邮箱。"); return; }
 
@@ -1288,13 +1289,13 @@
 
     api("/api/admin/users", {
       method: "POST",
-      body: { email: email, fullName: fullName, role: role, status: status }
+      body: { email: email, fullName: fullName, role: role }
     })
       .then(function () {
         el.createUserBtn.disabled = false;
         el.newUserEmail.value = "";
         el.newUserName.value = "";
-        showAlert("ok", "员工账号已创建，初始密码为 123456，首次登录后必须修改。");
+        showAlert("ok", "员工账号已创建（待激活），初始密码为 123456。请在下方列表将其改为「已启用」，员工首次登录后必须修改密码。");
         loadUsers();
       })
       .catch(function (err) {
@@ -1360,7 +1361,6 @@
     el.newUserEmail = $("newUserEmail");
     el.newUserName = $("newUserName");
     el.newUserRole = $("newUserRole");
-    el.newUserStatus = $("newUserStatus");
     el.createUserBtn = $("createUserBtn");
 
     // Forced password change modal

@@ -103,6 +103,8 @@ Last updated: 2026-10-17
       owner 可在员工列表点「重置密码」把账号恢复为 `123456` 并重新置位标记。
       > 注：初始密码原定为 `1234`，但 Supabase Auth 强制最短 6 位，创建账号会报
       > `Password should be at least 6 characters`，故改为 `123456`。
+      > 注：新建账号一律为 `pending`（待激活），创建表单不再提供状态选择；owner 需在员工列表
+      > 把状态改为「已启用」后，该账号才能登录后台（`requireRole` 只放行 `active`）。
       → [`0006_pomelo_forced_password_change.sql`](../supabase/migrations/0006_pomelo_forced_password_change.sql:1)、[`api/admin/me.js`](../api/admin/me.js:23)、[`api/admin/users.js`](../api/admin/users.js:49)
 
 - [ ] **FEAT-02** 员工账号删除（当前只能 `suspended`，无法彻底移除 auth 用户）。
@@ -199,6 +201,7 @@ Last updated: 2026-10-17
 | 2026-10-17 | SEC-01 ~ SEC-09 | 完成审计中的全部 P0 / P1 修复，并顺带完成 P2-1（设置页 admin+）。新增迁移 `0005_pomelo_security_hardening.sql`，改写 `_auth.js` / `settings.js` / `users.js`，更新 `admin.html` / `admin.js`。所有 JS 通过 `node --check`。 |
 | 2026-10-17 | FEAT-01 | owner 创建 admin/员工：邮箱即登录名，初始密码 `123456`，`must_change_password` 强制首登改密。新增迁移 `0006_pomelo_forced_password_change.sql`、端点 `api/admin/change-password.js`；`me.js` 返回标记；`users.js` 支持默认密码与 owner 重置；`admin.html`/`admin.js` 增加阻塞式改密弹窗与「重置密码」按钮。所有 JS 通过 `node --check`。 |
 | 2026-10-17 | FEAT-01 修复 | 创建账号报 `Password should be at least 6 characters`：Supabase Auth 最短 6 位，初始密码由 `1234` 改为 `123456`，同步更新 `admin.html` 提示与 `admin.js` 文案。 |
+| 2026-10-17 | FEAT-01 修复 | 创建表单移除「状态」下拉（新建账号必然是待激活，无需选择）。`createUser` 服务端固定写入 `status = 'pending'` 并忽略请求体中的 status，避免绕过激活流程；`admin.html` 提示补充「需改为已启用后才能登录」，`admin.js` 创建成功文案同步。 |
 
 ---
 

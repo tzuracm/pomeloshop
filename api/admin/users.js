@@ -62,6 +62,10 @@ async function listUsers(req, res) {
  * The email doubles as the login identity. Unless the owner supplies an
  * explicit password, the account starts on DEFAULT_PASSWORD and is forced to
  * change it on first login.
+ *
+ * New accounts are always created as "pending": the owner activates them from
+ * the users list afterwards. Accepting a caller-supplied status here would let
+ * an account skip the activation step, so it is deliberately ignored.
  */
 async function createUser(req, res) {
   const { admin } = await requireRole(req, "owner");
@@ -71,16 +75,13 @@ async function createUser(req, res) {
   const explicitPassword = String(body.password || "");
   const fullName = String(body.fullName || "").trim();
   const role = String(body.role || "user").trim();
-  const status = String(body.status || "active").trim();
+  const status = "pending";
 
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     throw new HttpError(400, "A valid email is required.");
   }
   if (!VALID_ROLES.includes(role)) {
     throw new HttpError(400, "Invalid role. Allowed: " + VALID_ROLES.join(", ") + ".");
-  }
-  if (!VALID_STATUSES.includes(status)) {
-    throw new HttpError(400, "Invalid status. Allowed: " + VALID_STATUSES.join(", ") + ".");
   }
 
   // Supabase enforces a minimum password length of 6. The shared bootstrap
