@@ -66,7 +66,10 @@
     formAlert:   $("formAlert"),
     wechatName:  $("wechatName"),
     phone:       $("phone"),
-    deliveryMethods: $("deliveryMethods"),
+    deliverySelect:  $("deliverySelect"),
+    deliveryTrigger: $("deliveryTrigger"),
+    deliveryValue:   $("deliveryValue"),
+    deliveryMenu:    $("deliveryMenu"),
     deliveryDetails: $("deliveryDetails"),
     catalogue:   $("catalogue"),
     totalAmount: $("totalAmount"),
@@ -99,7 +102,8 @@
     slipFile: null,     // File | null
     slipPreviewUrl: null,
     submitting: false,
-    lastQrPayload: null
+    lastQrPayload: null,
+    deliveryCode: ""    // currently selected delivery method code
   };
 
   function resetQty() {
@@ -364,39 +368,70 @@
   }
 
   function selectedMethodCode() {
-    var checked = document.querySelector('input[name="fulfilment"]:checked');
-    if (checked) return checked.value;
+    if (state.deliveryCode && findMethod(state.deliveryCode)) return state.deliveryCode;
     return DELIVERY_METHODS.length ? DELIVERY_METHODS[0].code : "";
   }
 
   function renderDeliveryMethods() {
-    if (!el.deliveryMethods) return;
+    if (!el.deliveryMenu) return;
 
     if (!DELIVERY_METHODS.length) {
-      el.deliveryMethods.innerHTML =
-        '<p class="muted">暂无可用交货方式，请联系卖家。</p>';
+      state.deliveryCode = "";
+      el.deliveryValue.textContent = "暂无可用交货方式";
+      el.deliveryMenu.innerHTML = "";
       el.deliveryDetails.innerHTML = "";
       return;
     }
 
-    var current = selectedMethodCode();
-    var known = !!findMethod(current);
-    if (!known) current = DELIVERY_METHODS[0].code;
+    // Keep the current choice when it still exists; otherwise fall back to
+    // the first method.
+    if (!findMethod(state.deliveryCode)) {
+      state.deliveryCode = DELIVERY_METHODS[0].code;
+    }
 
-    el.deliveryMethods.innerHTML = DELIVERY_METHODS.map(function (m) {
-      var id = "fm-" + m.code;
+    var current = selectedMethodCode();
+    var currentMethod = findMethod(current);
+
+    // Collapsed trigger shows the current choice.
+    el.deliveryValue.innerHTML =
+      escapeHtml(currentMethod.label) +
+      (currentMethod.description
+        ? "<small>" + escapeHtml(currentMethod.description) + "</small>"
+        : "");
+
+    // Expanded menu lists every option; exactly one is selected.
+    el.deliveryMenu.innerHTML = DELIVERY_METHODS.map(function (m) {
+      var isSel = m.code === current;
       return (
-        '<input type="radio" name="fulfilment" id="' + escapeHtml(id) + '"' +
-          ' value="' + escapeHtml(m.code) + '"' +
-          (m.code === current ? " checked" : "") + " />" +
-        '<label for="' + escapeHtml(id) + '">' +
-          escapeHtml(m.label) +
-          (m.description ? "<small>" + escapeHtml(m.description) + "</small>" : "") +
-        "</label>"
+        '<button type="button" class="select-option" role="option"' +
+          ' data-code="' + escapeHtml(m.code) + '"' +
+          ' aria-selected="' + (isSel ? "true" : "false") + '">' +
+          '<span class="opt-text">' + escapeHtml(m.label) +
+            (m.description ? "<small>" + escapeHtml(m.description) + "</small>" : "") +
+          "</span>" +
+          (isSel ? '<span class="opt-check" aria-hidden="true">✓</span>' : "") +
+        "</button>"
       );
     }).join("");
 
     renderDeliveryDetails();
+  }
+
+  function openDeliveryMenu(open) {
+    if (!el.deliverySelect) return;
+    el.deliverySelect.classList.toggle("open", open);
+    el.deliveryTrigger.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function onDeliveryMenuClick(ev) {
+    var btn = ev.target.closest(".select-option");
+    if (!btn) return;
+    var code = btn.getAttribute("data-code");
+    if (!findMethod(code)) return;
+
+    state.deliveryCode = code;
+    openDeliveryMenu(false);
+    renderDeliveryMethods();
   }
 
   function renderDeliveryDetails() {
@@ -714,11 +749,25 @@
     el.wechatName.addEventListener("input", updateSubmitState);
     el.phone.addEventListener("input", updateSubmitState);
 
-    if (el.deliveryMethods) {
-      el.deliveryMethods.addEventListener("change", function (ev) {
-        if (ev.target && ev.target.name === "fulfilment") renderDeliveryDetails();
+    // Collapsible single-select for 交货方式.
+    if (el.deliveryTrigger) {
+      el.deliveryTrigger.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        openDeliveryMenu(!el.deliverySelect.classList.contains("open"));
       });
     }
+    if (el.deliveryMenu) {
+      el.deliveryMenu.addEventListener("click", onDeliveryMenuClick);
+    }
+    // Click outside closes the menu.
+    document.addEventListener("click", function (ev) {
+      if (!el.deliverySelect) return;
+      if (!el.deliverySelect.contains(ev.target)) openDeliveryMenu(false);
+    });
+    // Esc closes the menu.
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") openDeliveryMenu(false);
+    });
 
     el.slipInput.addEventListener("change", function (ev) {
       setSlip(ev.target.files && ev.target.files[0]);

@@ -69,9 +69,19 @@
     <!-- Step 2 — delivery method (交货方式) -->
     <section class="card">
       <h2><span class="step">2</span> 交货方式</h2>
-      <div class="segmented" id="deliveryMethods">
-        <!-- Options are rendered from /api/config (pomelo_delivery_methods). -->
+
+      <!-- Collapsed single-select: shows the current choice; click to expand
+           the full option list. Options are rendered from /api/config
+           (pomelo_delivery_methods). -->
+      <div class="select" id="deliverySelect">
+        <button type="button" class="select-trigger" id="deliveryTrigger"
+                aria-haspopup="listbox" aria-expanded="false">
+          <span class="select-value" id="deliveryValue">加载中…</span>
+          <span class="select-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="select-menu" id="deliveryMenu" role="listbox" aria-label="交货方式"></div>
       </div>
+
       <div class="delivery-details" id="deliveryDetails"></div>
     </section>
 
