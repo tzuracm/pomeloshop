@@ -98,14 +98,17 @@ Last updated: 2026-10-17
 ## 2. 功能（FEAT）
 
 - [x] **FEAT-01** 员工账号自助改密码 + owner 重置密码。
-      实现：owner 创建账号时以邮箱为登录名，初始密码统一为 `123456`，并置 `must_change_password = true`；
-      员工首次登录后 [`admin.js`](../admin.js:1390) 弹出阻塞式改密弹窗，调用 [`api/admin/change-password.js`](../api/admin/change-password.js:1) 校验当前密码后更新；
-      owner 可在员工列表点「重置密码」把账号恢复为 `123456` 并重新置位标记。
-      > 注：初始密码原定为 `1234`，但 Supabase Auth 强制最短 6 位，创建账号会报
-      > `Password should be at least 6 characters`，故改为 `123456`。
+      实现：owner 创建账号时以邮箱为登录名，服务端为每个账号**随机生成** 12 位初始密码（`4-4-4` 分组，
+      字符集排除 `0/O/1/l/I`，约 70 bit 熵），在响应中**只返回一次**，后台用一次性凭据框展示，
+      并提供「复制密码」与「复制交接消息」（含登录网址、账号、密码、改密提示）两个按钮；
+      同时置 `must_change_password = true`。员工首次登录后 [`admin.js`](../admin.js:1560) 弹出阻塞式改密弹窗，
+      调用 [`api/admin/change-password.js`](../api/admin/change-password.js:1) 校验当前密码后更新。
+      owner 可在员工列表点「重置密码」生成新的随机密码（旧密码立即失效）并重新置位标记。
+      > 注：初始密码曾为全员共享的 `123456`，但那样唯一凭证就退化为"知道邮箱"，且可被抢先改密接管账号，
+      > 故改为每账号随机生成。明文不落库、不写日志。
       > 注：新建账号一律为 `pending`（待激活），创建表单不再提供状态选择；owner 需在员工列表
       > 把状态改为「已启用」后，该账号才能登录后台（`requireRole` 只放行 `active`）。
-      → [`0006_pomelo_forced_password_change.sql`](../supabase/migrations/0006_pomelo_forced_password_change.sql:1)、[`api/admin/me.js`](../api/admin/me.js:23)、[`api/admin/users.js`](../api/admin/users.js:49)
+      → [`0006_pomelo_forced_password_change.sql`](../supabase/migrations/0006_pomelo_forced_password_change.sql:1)、[`api/admin/me.js`](../api/admin/me.js:23)、[`api/admin/users.js`](../api/admin/users.js:34)
 
 - [ ] **FEAT-02** 员工账号删除（当前只能 `suspended`，无法彻底移除 auth 用户）。
       建议：`DELETE /api/admin/users`，调用 `admin.auth.admin.deleteUser`，并保留 profile 审计记录。
@@ -119,11 +122,10 @@ Last updated: 2026-10-17
       依赖：`SEC-14` 审计表。
       优先级：`P3` · 状态：`未开始`
 
-- [ ] **FEAT-05** 初始密码 `123456` 强度过低（且为全员共用的固定值）。
-      现状：Supabase Auth 最短 6 位，故取 `123456`；依赖 `must_change_password` 强制首登修改，
-      但若员工从不登录，该密码长期有效，且所有新账号共用同一初始密码。
-      建议：改为 8 位以上随机初始密码并由 owner 当面/私信告知，或为"未改密账号"设置自动停用时限。
-      优先级：`P2` · 状态：`未开始`
+- [x] **FEAT-05** 初始密码强度过低（原为全员共用的固定值 `123456`）。
+      已解决：改为每账号随机生成 12 位密码（`crypto.randomInt`，约 70 bit 熵），只在创建/重置的响应中
+      返回一次，后台一次性展示并支持复制交接消息。旧密码在重置时立即失效。
+      剩余可选项：为"长期未改密"的账号设置自动停用时限（当前未做，风险已大幅降低）。
       涉及：[`api/admin/users.js`](../api/admin/users.js:34)
 
 ---
@@ -202,6 +204,7 @@ Last updated: 2026-10-17
 | 2026-10-17 | FEAT-01 | owner 创建 admin/员工：邮箱即登录名，初始密码 `123456`，`must_change_password` 强制首登改密。新增迁移 `0006_pomelo_forced_password_change.sql`、端点 `api/admin/change-password.js`；`me.js` 返回标记；`users.js` 支持默认密码与 owner 重置；`admin.html`/`admin.js` 增加阻塞式改密弹窗与「重置密码」按钮。所有 JS 通过 `node --check`。 |
 | 2026-10-17 | FEAT-01 修复 | 创建账号报 `Password should be at least 6 characters`：Supabase Auth 最短 6 位，初始密码由 `1234` 改为 `123456`，同步更新 `admin.html` 提示与 `admin.js` 文案。 |
 | 2026-10-17 | FEAT-01 修复 | 创建表单移除「状态」下拉（新建账号必然是待激活，无需选择）。`createUser` 服务端固定写入 `status = 'pending'` 并忽略请求体中的 status，避免绕过激活流程；`admin.html` 提示补充「需改为已启用后才能登录」，`admin.js` 创建成功文案同步。 |
+| 2026-10-17 | FEAT-05 | 初始密码由固定 `123456` 改为每账号随机生成 12 位（`4-4-4` 分组，排除易混字符）。`users.js` 新增 `generatePassword()`，创建与重置均返回一次性 `initialPassword`，并删除 `body.password` 自定义路径；`admin.html`/`admin.js` 新增一次性凭据框、「复制密码」、「复制交接消息」（含登录网址与改密提示）。明文不落库、不写日志。所有 JS 通过 `node --check`。 |
 
 ---
 

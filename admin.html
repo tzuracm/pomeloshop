@@ -132,6 +132,27 @@
   }
   .pw-modal-card h2 { margin: 0 0 8px; font-size: 18px; }
   .pw-modal-card .field { margin-top: 12px; }
+
+  /* One-time credentials box */
+  .cred-box {
+    margin-top: 16px; padding: 16px; border: 1px solid #e0c98a;
+    border-radius: var(--radius-sm); background: #fffdf5;
+  }
+  .cred-box[hidden] { display: none; }
+  .cred-title { margin: 0 0 12px; font-weight: 700; font-size: 14px; }
+  .cred-row {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 8px; font-size: 13px;
+  }
+  .cred-label { min-width: 64px; color: var(--ink-soft); }
+  .cred-value {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px; padding: 4px 8px; background: #fff;
+    border: 1px solid var(--line); border-radius: 6px;
+    user-select: all; word-break: break-all;
+  }
+  .cred-secret { font-size: 15px; font-weight: 700; letter-spacing: 0.04em; }
+  .cred-warn { margin: 10px 0 0; font-size: 12px; color: var(--err); }
 </style>
 </head>
 <body>
@@ -285,9 +306,9 @@
     <div class="card">
       <h2>新建员工账号（仅 owner）</h2>
       <p class="readonly-note">
-        公开注册已关闭。员工账号只能由所有者在此创建。邮箱即登录账号；初始密码统一为
-        <strong>123456</strong>，员工首次登录后必须立即修改。新建账号一律为
-        <strong>待激活</strong>，需在下方列表中改为「已启用」后才能登录后台。
+        公开注册已关闭。员工账号只能由所有者在此创建，创建后为<strong>待激活</strong>。
+        初始密码由系统随机生成，<strong>只显示一次</strong>，请立即转交本人。
+        在下方列表把状态改为「已启用」后，员工即可登录，并被要求立即修改密码。
       </p>
       <div class="form-grid">
         <div>
@@ -309,6 +330,25 @@
       </div>
       <div style="margin-top:12px;">
         <button class="btn" id="createUserBtn">创建账号</button>
+      </div>
+
+      <!-- One-time credentials. Shown once after create/reset, then cleared. -->
+      <div id="credBox" class="cred-box" hidden>
+        <p class="cred-title">账号已就绪，请立即转交。</p>
+        <div class="cred-row">
+          <span class="cred-label">邮箱</span>
+          <code id="credEmail" class="cred-value"></code>
+        </div>
+        <div class="cred-row">
+          <span class="cred-label">初始密码</span>
+          <code id="credPassword" class="cred-value cred-secret"></code>
+          <button class="btn secondary" id="credCopyPassword" type="button">复制密码</button>
+        </div>
+        <div class="row-actions" style="margin-top:10px;">
+          <button class="btn" id="credCopyMessage" type="button">复制交接消息</button>
+          <button class="btn secondary" id="credClose" type="button">我已保存，关闭</button>
+        </div>
+        <p class="cred-warn">关闭后无法再次查看，只能重置密码。</p>
       </div>
     </div>
 

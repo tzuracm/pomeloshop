@@ -1188,7 +1188,7 @@
         : "";
 
       return (
-        '<tr data-id="' + escapeHtml(u.id) + '">' +
+        '<tr data-id="' + escapeHtml(u.id) + '" data-email="' + escapeHtml(u.email || "") + '">' +
           "<td>" + escapeHtml(u.email || "—") + (isSelf ? ' <span class="muted">(你)</span>' : "") + "</td>" +
           "<td>" + escapeHtml(u.full_name || "—") + "</td>" +
           "<td>" + fmtDate(u.created_at) + "</td>" +
@@ -1247,21 +1247,92 @@
       });
   }
 
-  /** Owner-only: put the account back on the bootstrap password (123456). */
+  // --------------------------------------------------------------------------
+  // One-time credentials handover
+  // --------------------------------------------------------------------------
+
+  /** Copy text to the clipboard, with a fallback for non-secure contexts. */
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () { return true; })
+        .catch(function () { return legacyCopy(text); });
+    }
+    return Promise.resolve(legacyCopy(text));
+  }
+
+  function legacyCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  /**
+   * Show the freshly generated password. It is displayed exactly once: the
+   * server never stores it, so closing the box means the only way back is a
+   * reset.
+   */
+  function showCredentials(email, password) {
+    el.credEmail.textContent = email || "";
+    el.credPassword.textContent = password || "";
+    el.credBox.hidden = false;
+    el.credBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function hideCredentials() {
+    el.credBox.hidden = true;
+    el.credEmail.textContent = "";
+    el.credPassword.textContent = "";
+  }
+
+  /** Ready-to-paste handover message for LINE / WhatsApp / SMS. */
+  function handoverMessage() {
+    var origin = window.location.origin;
+    return [
+      "Pomelo Shop 后台",
+      "网址：" + origin + "/login.html",
+      "账号：" + el.credEmail.textContent,
+      "初始密码：" + el.credPassword.textContent,
+      "首次登录会要求修改密码，请准备一个新密码（至少 8 位）。"
+    ].join("\n");
+  }
+
+  function onCopyPassword() {
+    copyToClipboard(el.credPassword.textContent).then(function (ok) {
+      showAlert(ok ? "ok" : "error", ok ? "密码已复制。" : "复制失败，请手动选中密码。");
+    });
+  }
+
+  function onCopyHandover() {
+    copyToClipboard(handoverMessage()).then(function (ok) {
+      showAlert(ok ? "ok" : "error", ok ? "交接消息已复制，可直接粘贴发送。" : "复制失败，请手动选中内容。");
+    });
+  }
+
+  /** Owner-only: issue a new random password and force a change on next login. */
   function onUserResetPassword(ev) {
     var btn = ev.currentTarget;
     var tr = btn.closest("tr");
     var userId = tr.getAttribute("data-id");
+    var email = tr.getAttribute("data-email") || "";
 
-    if (!window.confirm("将该账号密码重置为 123456，并要求其下次登录时修改？")) return;
+    if (!window.confirm("为该账号生成新的随机密码？旧密码将立即失效，对方下次登录必须修改密码。")) return;
 
     btn.disabled = true;
     hideAlert();
 
     api("/api/admin/users", { method: "PATCH", body: { userId: userId, resetPassword: true } })
-      .then(function () {
+      .then(function (data) {
         btn.disabled = false;
-        showAlert("ok", "密码已重置为 123456，该账号下次登录必须修改密码。");
+        showAlert("ok", "密码已重置，请立即把新密码转交本人。");
+        if (data && data.initialPassword) showCredentials(email, data.initialPassword);
         loadUsers();
       })
       .catch(function (err) {
@@ -1272,10 +1343,11 @@
 
   /**
    * Owner-only: provision a new staff account (public sign-up is disabled).
-   * The email is the login identity; the server assigns the bootstrap password
-   * (123456) and flags the account so the holder must change it on first login.
-   * New accounts always start as "pending" — the owner activates them from the
-   * list below, so there is no status choice at creation time.
+   * The email is the login identity; the server generates a per-account
+   * password and returns it once, and flags the account so the holder must
+   * change it on first login. New accounts always start as "pending" — the
+   * owner activates them from the list below, so there is no status choice at
+   * creation time.
    */
   function onCreateUser() {
     var email = el.newUserEmail.value.trim();
@@ -1291,11 +1363,12 @@
       method: "POST",
       body: { email: email, fullName: fullName, role: role }
     })
-      .then(function () {
+      .then(function (data) {
         el.createUserBtn.disabled = false;
         el.newUserEmail.value = "";
         el.newUserName.value = "";
-        showAlert("ok", "员工账号已创建（待激活），初始密码为 123456。请在下方列表将其改为「已启用」，员工首次登录后必须修改密码。");
+        showAlert("ok", "员工账号已创建（待激活）。请立即转交下方密码，并在列表中改为「已启用」。");
+        if (data && data.initialPassword) showCredentials(email, data.initialPassword);
         loadUsers();
       })
       .catch(function (err) {
@@ -1363,6 +1436,14 @@
     el.newUserRole = $("newUserRole");
     el.createUserBtn = $("createUserBtn");
 
+    // One-time credentials box
+    el.credBox = $("credBox");
+    el.credEmail = $("credEmail");
+    el.credPassword = $("credPassword");
+    el.credCopyPassword = $("credCopyPassword");
+    el.credCopyMessage = $("credCopyMessage");
+    el.credClose = $("credClose");
+
     // Forced password change modal
     el.pwModal = $("pwModal");
     el.pwAlert = $("pwAlert");
@@ -1404,6 +1485,11 @@
     el.qrClearBtn.addEventListener("click", onQrClear);
 
     if (el.createUserBtn) el.createUserBtn.addEventListener("click", onCreateUser);
+
+    // One-time credentials box
+    if (el.credCopyPassword) el.credCopyPassword.addEventListener("click", onCopyPassword);
+    if (el.credCopyMessage) el.credCopyMessage.addEventListener("click", onCopyHandover);
+    if (el.credClose) el.credClose.addEventListener("click", hideCredentials);
 
     // Forced password change modal
     if (el.pwSubmit) el.pwSubmit.addEventListener("click", onChangePassword);

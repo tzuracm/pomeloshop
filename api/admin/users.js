@@ -13,25 +13,40 @@
  *   • The role must be one of user/admin/owner; the status one of
  *     pending/active/suspended.
  *   • New accounts are created with the service_role client. The email is the
- *     login identity; the initial password is DEFAULT_PASSWORD and the account
- *     is flagged `must_change_password`, so the holder must replace it on first
- *     login.
+ *     login identity. The initial password is generated per account and
+ *     returned exactly once in the response, so the owner can hand it over.
+ *     The account is flagged `must_change_password`, so the holder must
+ *     replace it on first login.
  */
 
+import { randomInt } from "node:crypto";
 import { requireRole, withErrors, sendJson, readBody, HttpError } from "./_auth.js";
 
 const VALID_ROLES = ["user", "admin", "owner"];
 const VALID_STATUSES = ["pending", "active", "suspended"];
 
 /**
- * Shared bootstrap password for newly provisioned accounts. The account is
- * flagged `must_change_password`, so this value is only ever valid for the
- * first sign-in. An owner may override it by supplying `password` explicitly.
+ * Per-account bootstrap password.
  *
- * NOTE: Supabase Auth enforces a 6-character minimum, so "1234" is rejected
- * with "Password should be at least 6 characters". Keep this at 6+ characters.
+ * A shared constant would mean the only secret protecting a freshly provisioned
+ * account is its email address, which is guessable. Generating a fresh password
+ * per account removes that: until the owner hands the value over, nobody can
+ * sign in as the new account.
+ *
+ * 12 characters from a 57-symbol alphabet (ambiguous glyphs 0/O/1/l/I removed)
+ * is ~70 bits of entropy — far beyond brute force — while staying short enough
+ * to read aloud or copy by hand. Grouped 4-4-4 so it survives being dictated
+ * over the phone.
  */
-const DEFAULT_PASSWORD = "123456";
+const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+
+function generatePassword() {
+  let raw = "";
+  for (let i = 0; i < 12; i++) {
+    raw += PASSWORD_ALPHABET[randomInt(PASSWORD_ALPHABET.length)];
+  }
+  return raw.slice(0, 4) + "-" + raw.slice(4, 8) + "-" + raw.slice(8, 12);
+}
 
 const PROFILE_COLUMNS = "id, email, full_name, role, status, must_change_password, created_at";
 
@@ -59,9 +74,10 @@ async function listUsers(req, res) {
  * way to add staff. The auth user is created with the service_role client; the
  * `on_auth_user_created` trigger creates the matching profile row.
  *
- * The email doubles as the login identity. Unless the owner supplies an
- * explicit password, the account starts on DEFAULT_PASSWORD and is forced to
- * change it on first login.
+ * The email doubles as the login identity. The password is generated here and
+ * returned once in the response; the account is forced to change it on first
+ * login. Callers cannot supply their own password — that would reintroduce a
+ * weak, shared secret.
  *
  * New accounts are always created as "pending": the owner activates them from
  * the users list afterwards. Accepting a caller-supplied status here would let
@@ -72,7 +88,6 @@ async function createUser(req, res) {
   const body = readBody(req);
 
   const email = String(body.email || "").trim().toLowerCase();
-  const explicitPassword = String(body.password || "");
   const fullName = String(body.fullName || "").trim();
   const role = String(body.role || "user").trim();
   const status = "pending";
@@ -84,15 +99,8 @@ async function createUser(req, res) {
     throw new HttpError(400, "Invalid role. Allowed: " + VALID_ROLES.join(", ") + ".");
   }
 
-  // Supabase enforces a minimum password length of 6. The shared bootstrap
-  // password is shorter than the 8-character rule we apply to user-chosen
-  // passwords, so only validate an explicit override.
-  if (explicitPassword && explicitPassword.length < 8) {
-    throw new HttpError(400, "A custom password must be at least 8 characters.");
-  }
-
-  const password = explicitPassword || DEFAULT_PASSWORD;
-  const mustChange = !explicitPassword;
+  const password = generatePassword();
+  const mustChange = true;
 
   const { data: created, error: authError } = await admin.auth.admin.createUser({
     email,
@@ -127,7 +135,10 @@ async function createUser(req, res) {
     .maybeSingle();
 
   if (error) throw new HttpError(500, "Failed to create profile: " + error.message);
-  return sendJson(res, 201, { user: data });
+
+  // The plaintext password is returned exactly once, for the owner to hand
+  // over. It is never stored and never logged.
+  return sendJson(res, 201, { user: data, initialPassword: password });
 }
 
 async function updateUser(req, res) {
@@ -173,11 +184,13 @@ async function updateUser(req, res) {
     await assertNotLastOwner(admin, userId);
   }
 
-  // Owner-initiated password reset: put the account back on the bootstrap
-  // password and force a change on next login.
+  // Owner-initiated password reset: issue a fresh random password and force a
+  // change on next login. The old password stops working immediately.
+  let newPassword = null;
   if (wantsPasswordReset) {
+    newPassword = generatePassword();
     const { error: pwError } = await admin.auth.admin.updateUserById(userId, {
-      password: DEFAULT_PASSWORD,
+      password: newPassword,
     });
     if (pwError) {
       throw new HttpError(500, "Failed to reset password: " + pwError.message);
@@ -198,7 +211,10 @@ async function updateUser(req, res) {
 
   if (error) throw new HttpError(500, "Failed to update user: " + error.message);
   if (!data) throw new HttpError(404, "User not found.");
-  return sendJson(res, 200, { user: data });
+
+  const payload = { user: data };
+  if (newPassword) payload.initialPassword = newPassword;
+  return sendJson(res, 200, payload);
 }
 
 /** Reject the change when `userId` is the only active owner. */
