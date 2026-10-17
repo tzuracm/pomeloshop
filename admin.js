@@ -1247,13 +1247,13 @@
       });
   }
 
-  /** Owner-only: put the account back on the bootstrap password (1234). */
+  /** Owner-only: put the account back on the bootstrap password (123456). */
   function onUserResetPassword(ev) {
     var btn = ev.currentTarget;
     var tr = btn.closest("tr");
     var userId = tr.getAttribute("data-id");
 
-    if (!window.confirm("将该账号密码重置为 1234，并要求其下次登录时修改？")) return;
+    if (!window.confirm("将该账号密码重置为 123456，并要求其下次登录时修改？")) return;
 
     btn.disabled = true;
     hideAlert();
@@ -1261,7 +1261,7 @@
     api("/api/admin/users", { method: "PATCH", body: { userId: userId, resetPassword: true } })
       .then(function () {
         btn.disabled = false;
-        showAlert("ok", "密码已重置为 1234，该账号下次登录必须修改密码。");
+        showAlert("ok", "密码已重置为 123456，该账号下次登录必须修改密码。");
         loadUsers();
       })
       .catch(function (err) {
@@ -1273,7 +1273,7 @@
   /**
    * Owner-only: provision a new staff account (public sign-up is disabled).
    * The email is the login identity; the server assigns the bootstrap password
-   * (1234) and flags the account so the holder must change it on first login.
+   * (123456) and flags the account so the holder must change it on first login.
    */
   function onCreateUser() {
     var email = el.newUserEmail.value.trim();
@@ -1294,7 +1294,7 @@
         el.createUserBtn.disabled = false;
         el.newUserEmail.value = "";
         el.newUserName.value = "";
-        showAlert("ok", "员工账号已创建，初始密码为 1234，首次登录后必须修改。");
+        showAlert("ok", "员工账号已创建，初始密码为 123456，首次登录后必须修改。");
         loadUsers();
       })
       .catch(function (err) {

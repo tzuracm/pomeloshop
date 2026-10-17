@@ -98,9 +98,11 @@ Last updated: 2026-10-17
 ## 2. 功能（FEAT）
 
 - [x] **FEAT-01** 员工账号自助改密码 + owner 重置密码。
-      实现：owner 创建账号时以邮箱为登录名，初始密码统一为 `1234`，并置 `must_change_password = true`；
+      实现：owner 创建账号时以邮箱为登录名，初始密码统一为 `123456`，并置 `must_change_password = true`；
       员工首次登录后 [`admin.js`](../admin.js:1390) 弹出阻塞式改密弹窗，调用 [`api/admin/change-password.js`](../api/admin/change-password.js:1) 校验当前密码后更新；
-      owner 可在员工列表点「重置密码」把账号恢复为 `1234` 并重新置位标记。
+      owner 可在员工列表点「重置密码」把账号恢复为 `123456` 并重新置位标记。
+      > 注：初始密码原定为 `1234`，但 Supabase Auth 强制最短 6 位，创建账号会报
+      > `Password should be at least 6 characters`，故改为 `123456`。
       → [`0006_pomelo_forced_password_change.sql`](../supabase/migrations/0006_pomelo_forced_password_change.sql:1)、[`api/admin/me.js`](../api/admin/me.js:23)、[`api/admin/users.js`](../api/admin/users.js:49)
 
 - [ ] **FEAT-02** 员工账号删除（当前只能 `suspended`，无法彻底移除 auth 用户）。
@@ -115,11 +117,12 @@ Last updated: 2026-10-17
       依赖：`SEC-14` 审计表。
       优先级：`P3` · 状态：`未开始`
 
-- [ ] **FEAT-05** 初始密码 `1234` 强度过低，且 Supabase 默认最短密码为 6 位。
-      现状：`1234` 仅 4 位，依赖 `must_change_password` 强制首登修改；若员工从不登录，该密码长期有效。
+- [ ] **FEAT-05** 初始密码 `123456` 强度过低（且为全员共用的固定值）。
+      现状：Supabase Auth 最短 6 位，故取 `123456`；依赖 `must_change_password` 强制首登修改，
+      但若员工从不登录，该密码长期有效，且所有新账号共用同一初始密码。
       建议：改为 8 位以上随机初始密码并由 owner 当面/私信告知，或为"未改密账号"设置自动停用时限。
       优先级：`P2` · 状态：`未开始`
-      涉及：[`api/admin/users.js`](../api/admin/users.js:31)
+      涉及：[`api/admin/users.js`](../api/admin/users.js:34)
 
 ---
 
@@ -179,7 +182,7 @@ Last updated: 2026-10-17
       优先级：`P1` · 状态：`未开始`
 
 - [ ] **TEST-04** 强制改密流程测试：
-      - owner 新建 admin（邮箱为登录名）→ 用 `1234` 登录 → 应弹出改密弹窗且无法进入后台
+      - owner 新建 admin（邮箱为登录名）→ 用 `123456` 登录 → 应弹出改密弹窗且无法进入后台
       - 输入错误当前密码 → 应返回 400
       - 新密码少于 8 位 / 两次不一致 → 前端应拦截
       - 改密成功后刷新页面 → 弹窗不再出现
@@ -194,7 +197,8 @@ Last updated: 2026-10-17
 | 日期 | ID | 说明 |
 | --- | --- | --- |
 | 2026-10-17 | SEC-01 ~ SEC-09 | 完成审计中的全部 P0 / P1 修复，并顺带完成 P2-1（设置页 admin+）。新增迁移 `0005_pomelo_security_hardening.sql`，改写 `_auth.js` / `settings.js` / `users.js`，更新 `admin.html` / `admin.js`。所有 JS 通过 `node --check`。 |
-| 2026-10-17 | FEAT-01 | owner 创建 admin/员工：邮箱即登录名，初始密码 `1234`，`must_change_password` 强制首登改密。新增迁移 `0006_pomelo_forced_password_change.sql`、端点 `api/admin/change-password.js`；`me.js` 返回标记；`users.js` 支持默认密码与 owner 重置；`admin.html`/`admin.js` 增加阻塞式改密弹窗与「重置密码」按钮。所有 JS 通过 `node --check`。 |
+| 2026-10-17 | FEAT-01 | owner 创建 admin/员工：邮箱即登录名，初始密码 `123456`，`must_change_password` 强制首登改密。新增迁移 `0006_pomelo_forced_password_change.sql`、端点 `api/admin/change-password.js`；`me.js` 返回标记；`users.js` 支持默认密码与 owner 重置；`admin.html`/`admin.js` 增加阻塞式改密弹窗与「重置密码」按钮。所有 JS 通过 `node --check`。 |
+| 2026-10-17 | FEAT-01 修复 | 创建账号报 `Password should be at least 6 characters`：Supabase Auth 最短 6 位，初始密码由 `1234` 改为 `123456`，同步更新 `admin.html` 提示与 `admin.js` 文案。 |
 
 ---
 

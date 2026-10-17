@@ -27,8 +27,11 @@ const VALID_STATUSES = ["pending", "active", "suspended"];
  * Shared bootstrap password for newly provisioned accounts. The account is
  * flagged `must_change_password`, so this value is only ever valid for the
  * first sign-in. An owner may override it by supplying `password` explicitly.
+ *
+ * NOTE: Supabase Auth enforces a 6-character minimum, so "1234" is rejected
+ * with "Password should be at least 6 characters". Keep this at 6+ characters.
  */
-const DEFAULT_PASSWORD = "1234";
+const DEFAULT_PASSWORD = "123456";
 
 const PROFILE_COLUMNS = "id, email, full_name, role, status, must_change_password, created_at";
 
