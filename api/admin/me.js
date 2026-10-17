@@ -4,10 +4,12 @@
  * Returns the authenticated caller's identity and role. This is the single
  * source of truth the admin console uses to decide which tabs to show.
  *
- *   { user: { id, email }, role: "user" | "admin" | "owner" }
+ *   { user: { id, email }, role: "user" | "admin" | "owner",
+ *     mustChangePassword: boolean }
  *
- * Any authenticated staff member (user/admin/owner) may call it. A caller with
- * no profile row is treated as a plain `user`.
+ * Any active staff member (user/admin/owner) may call it. A caller with no
+ * profile row, an unknown role, or a non-active status is rejected (fail
+ * closed) by requireRole().
  */
 
 import { requireRole, withErrors, sendJson } from "./_auth.js";
@@ -21,10 +23,22 @@ function handler(req, res) {
 }
 
 async function getMe(req, res) {
-  const { user, role } = await requireRole(req, "user");
+  const { user, role, admin } = await requireRole(req, "user");
+
+  const { data: profile, error } = await admin
+    .from("profiles")
+    .select("must_change_password")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    return sendJson(res, 500, { error: "Failed to load profile: " + error.message });
+  }
+
   return sendJson(res, 200, {
     user: { id: user.id, email: user.email || null },
     role,
+    mustChangePassword: !!(profile && profile.must_change_password),
   });
 }
 

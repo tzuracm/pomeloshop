@@ -1,28 +1,33 @@
 /**
  * Vercel serverless function: /api/admin/settings
  *
- *   GET — read sensitive settings (any staff role: user/admin/owner)
+ *   GET — read sensitive settings (admin/owner ONLY)
  *   PUT — modify sensitive settings (owner ONLY)
  *
- * Settings are readable by everyone (the storefront needs the PromptPay ID to
- * build the QR), but only the owner may change them.
+ * The storefront reads the payment keys directly from Supabase under RLS
+ * (anon may read only `promptpay_id` / `promptpay_qr_payload`). Bank details
+ * are staff-only: a plain `user` (fulfilment staff) must not see them.
  *
  * Body for PUT: { key: string, value: string }  or  { entries: {k: v, ...} }
  */
 
 import { requireRole, withErrors, sendJson, readBody, HttpError } from "./_auth.js";
 
-/** Keys the owner is allowed to write. Extend as needed. */
+/** Keys the owner is allowed to write through this generic endpoint. */
 const WRITABLE_KEYS = new Set([
   "promptpay_id",
   "bank_name",
   "bank_account",
   "bank_holder",
-  // Confirmed EMVCo payload decoded from an uploaded bank QR. Written by
-  // /api/admin/payment-qr (owner only); listed here so the generic settings
-  // endpoint does not reject it if the owner edits it directly.
-  "promptpay_qr_payload",
 ]);
+
+/**
+ * `promptpay_qr_payload` is deliberately NOT writable here: it must be
+ * validated as an EMVCo payload (CRC + merchant GUID) by /api/admin/payment-qr.
+ * Accepting it through this endpoint would let an owner store a corrupt or
+ * unverified payload that the storefront then uses to build the payment QR.
+ */
+const QR_PAYLOAD_KEY = "promptpay_qr_payload";
 
 const MAX_VALUE = 500;
 
@@ -34,7 +39,8 @@ function handler(req, res) {
 }
 
 async function listSettings(req, res) {
-  const { admin } = await requireRole(req, "user");
+  // Bank details are admin+ only; a `user` has no business reading them.
+  const { admin } = await requireRole(req, "admin");
   const { data, error } = await admin
     .from("pomelo_settings")
     .select("key, value, updated_at")

@@ -82,6 +82,26 @@
     return baht.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   }
 
+  /**
+   * Return `url` only when it is a safe http(s) URL, else "".
+   *
+   * `slip_url` is buyer-controlled (anon INSERT). escapeHtml() stops attribute
+   * breakout but NOT a `javascript:` scheme, which would run in the admin
+   * origin where the Supabase session lives. The DB trigger rejects non-https
+   * inserts; this is the matching client-side guard for legacy rows.
+   */
+  function safeHttpUrl(url) {
+    var s = String(url == null ? "" : url).trim();
+    if (!s) return "";
+    try {
+      var parsed = new URL(s, window.location.origin);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") return parsed.href;
+    } catch (e) {
+      return "";
+    }
+    return "";
+  }
+
   function fmtDate(iso) {
     if (!iso) return "—";
     try {
@@ -110,17 +130,36 @@
   // API wrapper — always attaches the bearer token
   // --------------------------------------------------------------------------
 
+  /**
+   * Resolve the freshest session before each call. The token captured at boot
+   * expires after ~1h; without this the console would keep sending a stale
+   * token and bounce the user to login mid-session.
+   */
+  function currentSession() {
+    if (!state.client) return Promise.resolve(state.session);
+    return state.client.auth.getSession().then(function (res) {
+      var session = res && res.data ? res.data.session : null;
+      if (session) state.session = session;
+      return state.session;
+    }).catch(function () {
+      return state.session;
+    });
+  }
+
   function api(path, options) {
     options = options || {};
-    var headers = { "Content-Type": "application/json" };
-    if (state.session && state.session.access_token) {
-      headers.Authorization = "Bearer " + state.session.access_token;
-    }
 
-    return fetch(path, {
-      method: options.method || "GET",
-      headers: headers,
-      body: options.body ? JSON.stringify(options.body) : undefined
+    return currentSession().then(function (session) {
+      var headers = { "Content-Type": "application/json" };
+      if (session && session.access_token) {
+        headers.Authorization = "Bearer " + session.access_token;
+      }
+
+      return fetch(path, {
+        method: options.method || "GET",
+        headers: headers,
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
     }).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
         if (res.status === 401) {
@@ -250,9 +289,10 @@
         return escapeHtml(it.label || it.sku || "?") + " × " + escapeHtml(it.qty || 1);
       }).join("<br>");
 
-      var slip = o.slip_url
-        ? '<a class="slip-thumb" href="' + escapeHtml(o.slip_url) + '" target="_blank" rel="noopener" title="查看转账凭证">' +
-            '<img src="' + escapeHtml(o.slip_url) + '" alt="转账凭证" loading="lazy" />' +
+      var slipUrl = safeHttpUrl(o.slip_url);
+      var slip = slipUrl
+        ? '<a class="slip-thumb" href="' + escapeHtml(slipUrl) + '" target="_blank" rel="noopener" title="查看转账凭证">' +
+            '<img src="' + escapeHtml(slipUrl) + '" alt="转账凭证" loading="lazy" />' +
           "</a>"
         : '<span class="muted">—</span>';
 
@@ -315,12 +355,14 @@
     btn.textContent = "生成中…";
     hideAlert();
 
-    var headers = {};
-    if (state.session && state.session.access_token) {
-      headers.Authorization = "Bearer " + state.session.access_token;
-    }
-
-    fetch("/api/admin/orders-export" + qs, { headers: headers })
+    currentSession()
+      .then(function (session) {
+        var headers = {};
+        if (session && session.access_token) {
+          headers.Authorization = "Bearer " + session.access_token;
+        }
+        return fetch("/api/admin/orders-export" + qs, { headers: headers });
+      })
       .then(function (res) {
         if (res.status === 401) {
           window.location.replace("/login.html");
@@ -1080,6 +1122,8 @@
       });
   }
 
+  var STATUS_LABEL = { pending: "待激活", active: "已启用", suspended: "已停用" };
+
   function renderUsers() {
     if (!state.users.length) {
       el.usersBody.innerHTML = '<div class="empty">暂无员工</div>';
@@ -1088,10 +1132,17 @@
 
     var rows = state.users.map(function (u) {
       var isSelf = state.session && u.id === state.session.user.id;
-      var options = ["user", "admin", "owner"].map(function (r) {
+      var roleOptions = ["user", "admin", "owner"].map(function (r) {
         return '<option value="' + r + '"' + (u.role === r ? " selected" : "") + ">" +
           escapeHtml(ROLE_LABEL[r] || r) + " (" + r + ")</option>";
       }).join("");
+      var statusOptions = ["active", "suspended", "pending"].map(function (s) {
+        return '<option value="' + s + '"' + (u.status === s ? " selected" : "") + ">" +
+          escapeHtml(STATUS_LABEL[s] || s) + "</option>";
+      }).join("");
+      var pwBadge = u.must_change_password
+        ? ' <span class="pill pending" title="仍在使用初始密码">待改密</span>'
+        : "";
 
       return (
         '<tr data-id="' + escapeHtml(u.id) + '">' +
@@ -1100,10 +1151,15 @@
           "<td>" + fmtDate(u.created_at) + "</td>" +
           "<td>" +
             (isSelf
-              ? '<span class="pill ' + escapeHtml(u.role) + '">' + escapeHtml(ROLE_LABEL[u.role] || u.role) + "</span>"
-              : '<select class="user-role">' + options + "</select>" +
+              ? '<span class="pill ' + escapeHtml(u.role) + '">' + escapeHtml(ROLE_LABEL[u.role] || u.role) + "</span>" +
+                ' <span class="muted">' + escapeHtml(STATUS_LABEL[u.status] || u.status || "") + "</span>" +
+                pwBadge
+              : '<select class="user-role">' + roleOptions + "</select>" +
+                '<select class="user-status" style="margin-left:6px;">' + statusOptions + "</select>" +
+                pwBadge +
                 '<div class="row-actions" style="margin-top:6px;">' +
                   '<button class="btn user-save">保存</button>' +
+                  '<button class="btn secondary user-reset">重置密码</button>' +
                 "</div>") +
           "</td>" +
         "</tr>"
@@ -1112,12 +1168,17 @@
 
     el.usersBody.innerHTML =
       "<table><thead><tr>" +
-        "<th>邮箱</th><th>姓名</th><th>加入时间</th><th>角色</th>" +
+        "<th>邮箱</th><th>姓名</th><th>加入时间</th><th>角色 / 状态</th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table>";
 
     var buttons = el.usersBody.querySelectorAll(".user-save");
     for (var i = 0; i < buttons.length; i++) {
       buttons[i].addEventListener("click", onUserSave);
+    }
+
+    var resets = el.usersBody.querySelectorAll(".user-reset");
+    for (var j = 0; j < resets.length; j++) {
+      resets[j].addEventListener("click", onUserResetPassword);
     }
   }
 
@@ -1126,18 +1187,75 @@
     var tr = btn.closest("tr");
     var userId = tr.getAttribute("data-id");
     var role = tr.querySelector(".user-role").value;
+    var status = tr.querySelector(".user-status").value;
 
     btn.disabled = true;
     hideAlert();
 
-    api("/api/admin/users", { method: "PATCH", body: { userId: userId, role: role } })
+    api("/api/admin/users", { method: "PATCH", body: { userId: userId, role: role, status: status } })
       .then(function () {
         btn.disabled = false;
-        showAlert("ok", "角色已更新。");
+        showAlert("ok", "角色与状态已更新。");
         loadUsers();
       })
       .catch(function (err) {
         btn.disabled = false;
+        fail(err);
+      });
+  }
+
+  /** Owner-only: put the account back on the bootstrap password (1234). */
+  function onUserResetPassword(ev) {
+    var btn = ev.currentTarget;
+    var tr = btn.closest("tr");
+    var userId = tr.getAttribute("data-id");
+
+    if (!window.confirm("将该账号密码重置为 1234，并要求其下次登录时修改？")) return;
+
+    btn.disabled = true;
+    hideAlert();
+
+    api("/api/admin/users", { method: "PATCH", body: { userId: userId, resetPassword: true } })
+      .then(function () {
+        btn.disabled = false;
+        showAlert("ok", "密码已重置为 1234，该账号下次登录必须修改密码。");
+        loadUsers();
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        fail(err);
+      });
+  }
+
+  /**
+   * Owner-only: provision a new staff account (public sign-up is disabled).
+   * The email is the login identity; the server assigns the bootstrap password
+   * (1234) and flags the account so the holder must change it on first login.
+   */
+  function onCreateUser() {
+    var email = el.newUserEmail.value.trim();
+    var fullName = el.newUserName.value.trim();
+    var role = el.newUserRole.value;
+    var status = el.newUserStatus.value;
+
+    if (!email) { showAlert("error", "请填写邮箱。"); return; }
+
+    el.createUserBtn.disabled = true;
+    hideAlert();
+
+    api("/api/admin/users", {
+      method: "POST",
+      body: { email: email, fullName: fullName, role: role, status: status }
+    })
+      .then(function () {
+        el.createUserBtn.disabled = false;
+        el.newUserEmail.value = "";
+        el.newUserName.value = "";
+        showAlert("ok", "员工账号已创建，初始密码为 1234，首次登录后必须修改。");
+        loadUsers();
+      })
+      .catch(function (err) {
+        el.createUserBtn.disabled = false;
         fail(err);
       });
   }
@@ -1196,6 +1314,20 @@
     el.settingsSave = $("settingsSave");
 
     el.usersBody = $("usersBody");
+    el.newUserEmail = $("newUserEmail");
+    el.newUserName = $("newUserName");
+    el.newUserRole = $("newUserRole");
+    el.newUserStatus = $("newUserStatus");
+    el.createUserBtn = $("createUserBtn");
+
+    // Forced password change modal
+    el.pwModal = $("pwModal");
+    el.pwAlert = $("pwAlert");
+    el.pwCurrent = $("pwCurrent");
+    el.pwNew = $("pwNew");
+    el.pwConfirm = $("pwConfirm");
+    el.pwSubmit = $("pwSubmit");
+    el.pwSignOut = $("pwSignOut");
   }
 
   function wireEvents() {
@@ -1227,17 +1359,101 @@
     el.qrConfirmBtn.addEventListener("click", onQrConfirm);
     el.qrCancelBtn.addEventListener("click", onQrCancel);
     el.qrClearBtn.addEventListener("click", onQrClear);
+
+    if (el.createUserBtn) el.createUserBtn.addEventListener("click", onCreateUser);
+
+    // Forced password change modal
+    if (el.pwSubmit) el.pwSubmit.addEventListener("click", onChangePassword);
+    if (el.pwSignOut) {
+      el.pwSignOut.addEventListener("click", function () {
+        state.client.auth.signOut().then(function () {
+          window.location.replace("/login.html");
+        });
+      });
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Forced password change (first login)
+  // --------------------------------------------------------------------------
+
+  function pwAlert(kind, html) {
+    el.pwAlert.className = "alert " + kind + " show";
+    el.pwAlert.innerHTML = html;
+  }
+
+  function pwClearAlert() {
+    el.pwAlert.className = "alert";
+    el.pwAlert.innerHTML = "";
+  }
+
+  /** Show the blocking modal. The console is unusable until it is dismissed. */
+  function showPasswordModal() {
+    el.pwModal.hidden = false;
+    el.pwCurrent.value = "";
+    el.pwNew.value = "";
+    el.pwConfirm.value = "";
+    pwClearAlert();
+    el.pwCurrent.focus();
+  }
+
+  function hidePasswordModal() {
+    el.pwModal.hidden = true;
+  }
+
+  function onChangePassword() {
+    var current = el.pwCurrent.value;
+    var next = el.pwNew.value;
+    var confirm = el.pwConfirm.value;
+
+    pwClearAlert();
+
+    if (!current) { pwAlert("error", "请输入当前密码。"); return; }
+    if (next.length < 8) { pwAlert("error", "新密码至少 8 位。"); return; }
+    if (next !== confirm) { pwAlert("error", "两次输入的新密码不一致。"); return; }
+    if (next === current) { pwAlert("error", "新密码不能与当前密码相同。"); return; }
+
+    el.pwSubmit.disabled = true;
+
+    api("/api/admin/change-password", {
+      method: "POST",
+      body: { currentPassword: current, newPassword: next }
+    })
+      .then(function () {
+        el.pwSubmit.disabled = false;
+        hidePasswordModal();
+        showAlert("ok", "密码已更新。");
+        // Re-resolve the role so the console loads with the new state.
+        return resolveRole().then(function (role) {
+          state.role = role;
+          el.whoRole.textContent = ROLE_LABEL[role] || role;
+          applyRoleGating();
+          activateTab("orders");
+        });
+      })
+      .catch(function (err) {
+        el.pwSubmit.disabled = false;
+        pwAlert("error", escapeHtml(err && err.message ? err.message : String(err)));
+      });
   }
 
   /**
-   * Discover the caller's role from the server. /api/admin/me verifies the
-   * bearer token and returns the role stored in `profiles` — the client never
-   * asserts its own role.
+   * Discover the caller's identity and role from the server. /api/admin/me
+   * verifies the bearer token and returns the role stored in `profiles` — the
+   * client never asserts its own role. It also reports whether the account is
+   * still on its initial password.
    */
-  function resolveRole() {
+  function resolveMe() {
     return api("/api/admin/me").then(function (data) {
-      return (data && data.role) || "user";
+      return {
+        role: (data && data.role) || "user",
+        mustChangePassword: !!(data && data.mustChangePassword)
+      };
     });
+  }
+
+  function resolveRole() {
+    return resolveMe().then(function (me) { return me.role; });
   }
 
   function boot() {
@@ -1264,14 +1480,22 @@
 
         el.whoEmail.textContent = state.email || "—";
 
-        // Refresh the token if it is close to expiry, then resolve the role.
+        // Refresh the token if it is close to expiry, then resolve identity.
         state.client.auth.getUser().then(function () {
-          return resolveRole();
-        }).then(function (role) {
-          state.role = role;
-          el.whoRole.textContent = ROLE_LABEL[role] || role;
+          return resolveMe();
+        }).then(function (me) {
+          state.role = me.role;
+          el.whoRole.textContent = ROLE_LABEL[me.role] || me.role;
           applyRoleGating();
           wireEvents();
+
+          // First login on the shared bootstrap password: block the console
+          // until the account holder sets their own password.
+          if (me.mustChangePassword) {
+            showPasswordModal();
+            return;
+          }
+
           activateTab("orders");
         }).catch(function (err) {
           fail(err);

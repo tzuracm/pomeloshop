@@ -60,6 +60,10 @@ export function serviceClient() {
 /**
  * Verify the caller and assert they hold at least `minRole`.
  *
+ * FAIL CLOSED: a caller with no profile row, an unknown role, or a status other
+ * than 'active' is rejected. Authentication alone is NOT staff membership —
+ * otherwise a public sign-up (or a deleted profile) would grant order access.
+ *
  * @param {import('http').IncomingMessage} req
  * @param {"user"|"admin"|"owner"} minRole
  * @returns {Promise<{ user: object, role: string, admin: object }>}
@@ -80,7 +84,7 @@ export async function requireRole(req, minRole) {
   const admin = serviceClient();
   const { data: profile, error: profileError } = await admin
     .from("profiles")
-    .select("role")
+    .select("role, status")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -88,8 +92,16 @@ export async function requireRole(req, minRole) {
     throw new HttpError(500, "Failed to load caller profile.");
   }
 
-  const role = profile?.role || "user";
-  const have = ROLE_RANK[role] || 0;
+  // No profile, unknown role, or inactive account => no access.
+  if (!profile || !Object.prototype.hasOwnProperty.call(ROLE_RANK, profile.role)) {
+    throw new HttpError(403, "No active staff profile for this account.");
+  }
+  if (profile.status !== "active") {
+    throw new HttpError(403, "This account is not active. Ask an owner to activate it.");
+  }
+
+  const role = profile.role;
+  const have = ROLE_RANK[role];
   const need = ROLE_RANK[minRole] || 0;
   if (have < need) {
     throw new HttpError(403, `Insufficient role: ${minRole} required.`);

@@ -117,7 +117,21 @@
     border: 1px solid var(--line); border-radius: var(--radius-sm);
   }
   .qr-current .qr-mini img { display: block; width: 140px; height: 140px; }
-</style>
+
+  /* Forced password change modal */
+  .pw-modal {
+    position: fixed; inset: 0; z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(28, 24, 18, 0.55); padding: 20px;
+  }
+  .pw-modal[hidden] { display: none; }
+  .pw-modal-card {
+    width: 100%; max-width: 420px; background: #fff;
+    border-radius: var(--radius); padding: 24px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+  }
+  .pw-modal-card h2 { margin: 0 0 8px; font-size: 18px; }
+  .pw-modal-card .field { margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -139,7 +153,7 @@
     <button class="tab" data-tab="delivery" data-min="admin">交货方式</button>
     <button class="tab" data-tab="payment" data-min="admin">收款二维码</button>
     <button class="tab" data-tab="content" data-min="owner">页面文字</button>
-    <button class="tab" data-tab="settings" data-min="user">敏感设置</button>
+    <button class="tab" data-tab="settings" data-min="admin">敏感设置</button>
     <button class="tab" data-tab="users" data-min="owner">员工与权限</button>
   </nav>
 
@@ -269,10 +283,74 @@
   <!-- ===================== Users ===================== -->
   <section class="panel" id="panel-users">
     <div class="card">
+      <h2>新建员工账号（仅 owner）</h2>
+      <p class="readonly-note">
+        公开注册已关闭。员工账号只能由所有者在此创建。邮箱即登录账号；初始密码统一为
+        <strong>1234</strong>，员工首次登录后必须立即修改。
+      </p>
+      <div class="form-grid">
+        <div>
+          <label for="newUserEmail">邮箱（登录账号）</label>
+          <input type="email" id="newUserEmail" placeholder="staff@example.com" />
+        </div>
+        <div>
+          <label for="newUserName">姓名（可选）</label>
+          <input type="text" id="newUserName" />
+        </div>
+        <div>
+          <label for="newUserRole">角色</label>
+          <select id="newUserRole">
+            <option value="admin">管理员 (admin)</option>
+            <option value="user">员工 (user)</option>
+            <option value="owner">所有者 (owner)</option>
+          </select>
+        </div>
+        <div>
+          <label for="newUserStatus">状态</label>
+          <select id="newUserStatus">
+            <option value="active">已启用</option>
+            <option value="pending">待激活</option>
+            <option value="suspended">已停用</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <button class="btn" id="createUserBtn">创建账号</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>员工与权限（仅 owner）</h2>
       <div id="usersBody"><div class="empty">加载中…</div></div>
     </div>
   </section>
+
+  <!-- ============ Forced password change (first login) ============ -->
+  <div id="pwModal" class="pw-modal" hidden>
+    <div class="pw-modal-card">
+      <h2>请先修改初始密码</h2>
+      <p class="readonly-note">
+        你的账号仍在使用初始密码。为保护订单与客户资料，必须先设置新密码才能继续使用后台。
+      </p>
+      <div id="pwAlert" class="alert error"></div>
+      <div class="field">
+        <label for="pwCurrent">当前密码</label>
+        <input type="password" id="pwCurrent" autocomplete="current-password" placeholder="初始密码" />
+      </div>
+      <div class="field">
+        <label for="pwNew">新密码（至少 8 位）</label>
+        <input type="password" id="pwNew" autocomplete="new-password" />
+      </div>
+      <div class="field">
+        <label for="pwConfirm">再次输入新密码</label>
+        <input type="password" id="pwConfirm" autocomplete="new-password" />
+      </div>
+      <div class="row-actions" style="margin-top:12px;">
+        <button class="btn" id="pwSubmit">保存新密码</button>
+        <button class="btn secondary" id="pwSignOut">退出登录</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
