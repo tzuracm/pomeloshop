@@ -192,6 +192,11 @@
   // 5. Catalogue rendering
   // ---------------------------------------------------------------------
   function renderCatalogue() {
+    if (!CATALOGUE.length) {
+      el.catalogue.innerHTML = '<div class="empty">暂无在售商品，请稍后再来。</div>';
+      return;
+    }
+
     el.catalogue.innerHTML = CATALOGUE.map(function (item) {
       var q = state.qty[item.sku] || 0;
       return (
@@ -901,8 +906,10 @@
       el.ppId.textContent = "PromptPay · 已确认收款账户";
     }
 
-    // Swap in the live catalogue when the server returned one.
-    if (Array.isArray(cfg.catalogue) && cfg.catalogue.length) {
+    // Swap in the live catalogue. An empty array is meaningful: it means every
+    // product is currently down-listed, so we must NOT fall back to the
+    // built-in DEFAULT_CATALOGUE (that would keep selling hidden products).
+    if (Array.isArray(cfg.catalogue)) {
       CATALOGUE = cfg.catalogue.map(function (it) {
         return {
           sku: it.sku,
@@ -912,6 +919,7 @@
       });
       resetQty();
       renderCatalogue();
+      refreshTotals();
     }
 
     // Swap in the live delivery methods when the server returned any.

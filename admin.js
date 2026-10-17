@@ -460,15 +460,21 @@
     }
 
     var rows = state.catalogue.map(function (it) {
+      var status = it.active
+        ? '<span class="pill paid">在售</span>'
+        : '<span class="pill cancelled">已下架</span>';
       return (
         '<tr data-sku="' + escapeHtml(it.sku) + '">' +
           '<td class="mono">' + escapeHtml(it.sku) + "</td>" +
           "<td>" + escapeHtml(it.label) + "</td>" +
           '<td class="mono">฿' + escapeHtml(it.unit_price) + "</td>" +
           "<td>" + escapeHtml(it.sort_order) + "</td>" +
-          "<td>" + (it.active ? "是" : "否") + "</td>" +
+          "<td>" + status + "</td>" +
           '<td><div class="row-actions">' +
             '<button class="btn secondary cat-edit">编辑</button>' +
+            '<button class="btn ' + (it.active ? "secondary" : "") + ' cat-toggle">' +
+              (it.active ? "下架" : "上架") +
+            "</button>" +
             '<button class="btn danger cat-del">删除</button>' +
           "</div></td>" +
         "</tr>"
@@ -477,14 +483,51 @@
 
     el.catalogueBody.innerHTML =
       "<table><thead><tr>" +
-        "<th>SKU</th><th>名称</th><th>单价</th><th>排序</th><th>上架</th><th>操作</th>" +
+        "<th>SKU</th><th>名称</th><th>单价</th><th>排序</th><th>状态</th><th>操作</th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table>";
 
     var edits = el.catalogueBody.querySelectorAll(".cat-edit");
     for (var i = 0; i < edits.length; i++) edits[i].addEventListener("click", onCatalogueEdit);
 
+    var toggles = el.catalogueBody.querySelectorAll(".cat-toggle");
+    for (var j = 0; j < toggles.length; j++) toggles[j].addEventListener("click", onCatalogueToggle);
+
     var dels = el.catalogueBody.querySelectorAll(".cat-del");
-    for (var j = 0; j < dels.length; j++) dels[j].addEventListener("click", onCatalogueDelete);
+    for (var k = 0; k < dels.length; k++) dels[k].addEventListener("click", onCatalogueDelete);
+  }
+
+  function findCatalogueItem(sku) {
+    for (var i = 0; i < state.catalogue.length; i++) {
+      if (state.catalogue[i].sku === sku) return state.catalogue[i];
+    }
+    return null;
+  }
+
+  /**
+   * Flip a product between on-sale and off-sale. The storefront only receives
+   * `active` items from /api/config, so a down-listed product disappears from
+   * the buyer page on their next load.
+   */
+  function onCatalogueToggle(ev) {
+    var btn = ev.currentTarget;
+    var sku = btn.closest("tr").getAttribute("data-sku");
+    var item = findCatalogueItem(sku);
+    if (!item) return;
+
+    var next = !item.active;
+    btn.disabled = true;
+    hideAlert();
+
+    api("/api/admin/catalogue", { method: "PATCH", body: { sku: sku, active: next } })
+      .then(function () {
+        btn.disabled = false;
+        showAlert("ok", next ? "商品已上架，买家端可见。" : "商品已下架，买家端不再显示。");
+        loadCatalogue();
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        fail(err);
+      });
   }
 
   function onCatalogueEdit(ev) {
