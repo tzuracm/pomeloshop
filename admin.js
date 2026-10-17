@@ -174,12 +174,16 @@
   function applyRoleGating() {
     var have = ROLE_RANK[state.role] || 0;
 
-    // Tabs
+    // Tabs. Gated tabs start hidden in CSS (see admin.html) so an admin never
+    // sees the owner-only tabs flash before the role resolves. Reveal the ones
+    // this caller may use, then flip the body flag that enables the CSS rule.
     var tabs = el.tabs.querySelectorAll(".tab");
     for (var i = 0; i < tabs.length; i++) {
       var need = ROLE_RANK[tabs[i].getAttribute("data-min")] || 1;
       tabs[i].style.display = have >= need ? "" : "none";
     }
+    document.body.classList.remove("role-pending");
+    document.body.classList.add("role-ready");
 
     // If the currently active tab is now hidden, fall back to orders.
     var activeBtn = el.tabs.querySelector('.tab[data-tab="' + state.activeTab + '"]');

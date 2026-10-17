@@ -17,8 +17,11 @@
   /api/admin/* call re-checks the caller's role. Hiding a tab is UX only.
 
     user  : Orders (status/note only)
-    admin : + Catalogue
-    owner : + Page text, Settings (write), Staff & roles
+    admin : + Catalogue, Delivery methods, Payment QR
+    owner : + Page text, Staff & roles
+
+  Gated tabs are hidden by CSS until `role-ready` is set on <body>, so an
+  admin never sees the owner-only tabs flash on refresh.
   ============================================================================
 -->
 
@@ -45,6 +48,19 @@
   .tab.active { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
   .panel { display: none; }
   .panel.active { display: block; }
+
+  /*
+   * Role gating happens after /api/admin/me resolves, which is a network round
+   * trip. Without this, an admin briefly sees the owner-only tabs (页面文字,
+   * 员工与权限) on every refresh. Hide every gated tab until JS has resolved the
+   * role and added `role-ready` to <body>; `applyRoleGating()` then reveals the
+   * ones the caller may use. The ungated 订单 tab stays visible throughout.
+   */
+  .tab[data-min]:not([data-min="user"]) { display: none; }
+  body.role-ready .tab[data-min]:not([data-min="user"]) { display: inline-block; }
+  /* The QR buttons are gated the same way; they are inline-flex in .row-actions. */
+  #qrClearBtn[data-min], #qrConfirmBtn[data-min] { display: none; }
+  body.role-ready #qrClearBtn[data-min], body.role-ready #qrConfirmBtn[data-min] { display: inline-block; }
 
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -155,7 +171,7 @@
   .cred-warn { margin: 10px 0 0; font-size: 12px; color: var(--err); }
 </style>
 </head>
-<body>
+<body class="role-pending">
 
   <div class="topbar">
     <h1>🍊 Pomelo 管理后台</h1>
