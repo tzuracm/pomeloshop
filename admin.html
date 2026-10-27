@@ -240,13 +240,16 @@
     <div class="card">
       <h2>交货方式</h2>
       <p class="readonly-note">
-        这里配置买家下单时可选的方式（例如「自提」）。停用的方式不再展示给买家，
-        但历史订单仍保留原记录。
+        这里配置买家下单时可选的方式（例如「自提」）。<strong>每一行就是一个自提点</strong>，
+        买家只能选择其中一个。停用的方式不再展示给买家，但历史订单仍保留原记录。
+        「自提点名称」与「详细地址」用于后台订单列表和 Excel 导出，方便员工发货。
       </p>
       <div class="form-grid">
         <div><label for="dmCode">代码</label><input type="text" id="dmCode" placeholder="保存后自动生成" readonly /></div>
         <div><label for="dmLabel">名称</label><input type="text" id="dmLabel" placeholder="自提" /></div>
         <div><label for="dmDescription">副标题</label><input type="text" id="dmDescription" placeholder="Self-Pickup" /></div>
+        <div><label for="dmPickupPoint">自提点名称</label><input type="text" id="dmPickupPoint" placeholder="拉差达店" /></div>
+        <div><label for="dmPickupAddress">自提点详细地址</label><input type="text" id="dmPickupAddress" placeholder="XXX 路 123 号 …" /></div>
         <div><label for="dmTimeWindow">取货时间窗口</label><input type="text" id="dmTimeWindow" placeholder="每天 10:00–18:00" /></div>
         <div><label for="dmMapUrl">Google Maps 链接</label><input type="text" id="dmMapUrl" placeholder="https://maps.app.goo.gl/…" /></div>
         <div><label for="dmSort">排序</label><input type="number" id="dmSort" step="1" placeholder="1" /></div>

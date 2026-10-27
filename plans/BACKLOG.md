@@ -135,6 +135,16 @@ Last updated: 2026-10-17
       剩余可选项：为"长期未改密"的账号设置自动停用时限（当前未做，风险已大幅降低）。
       涉及：[`api/admin/users.js`](../api/admin/users.js:34)
 
+- [x] **FEAT-06** 后台订单列表与 Excel 只显示「自提」，无法区分三个自提点，员工发货时不知道送哪个点。
+      范围：仅改后台与数据库，**前台不改**。
+      实现：`pomelo_delivery_methods` 新增 `pickup_point` / `pickup_address`（后台「交货方式」可编辑）；
+      迁移 `0009` 新增订单快照列与 `pomelo_orders_snapshot_fulfilment` 触发器（服务端写入，客户端不可伪造），
+      并回填历史订单；后台订单表显示「自提点 / 地址 / 地图」，Excel 新增 `自提点`、`自提地址`、`取货时间` 三列，
+      快照优先、缺失时回退到实时方式配置。
+      剩余：执行迁移 `0009`，并在后台为三个自提点填写名称与地址。
+      优先级：`P1` · 状态：`待验证`
+      涉及：[`plans/pickup-point-display.md`](pickup-point-display.md)、[`0009_pomelo_pickup_points.sql`](../supabase/migrations/0009_pomelo_pickup_points.sql:1)
+
 ---
 
 ## 3. 运维 / 部署（OPS）
@@ -161,6 +171,12 @@ Last updated: 2026-10-17
       执行后确认末尾校验查询只返回 `settings_admin_write` 一条写策略。
       优先级：`P0` · 状态：`未开始`
       涉及：[`0008_pomelo_settings_admin_write.sql`](../supabase/migrations/0008_pomelo_settings_admin_write.sql:1)
+
+- [ ] **OPS-09** 执行 `0009_pomelo_pickup_points.sql`（自提点字段 + 订单快照触发器 + 历史订单回填）。
+      **执行顺序**：先执行迁移，再部署代码；随后在后台「交货方式」为三个自提点填写名称与地址。
+      执行后确认末尾校验查询中 `fulfilment_label` 无空值。
+      优先级：`P1` · 状态：`未开始`
+      涉及：[`0009_pomelo_pickup_points.sql`](../supabase/migrations/0009_pomelo_pickup_points.sql:1)
 
 - [ ] **OPS-03** 在 Supabase Auth 设置中**关闭公开注册**（`Disable signup`），员工账号只能由 owner 在后台创建。
       优先级：`P0` · 状态：`未开始`

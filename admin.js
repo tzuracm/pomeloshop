@@ -264,6 +264,36 @@
     return code;
   }
 
+  /**
+   * Delivery-method cell for the orders table.
+   *
+   * Shows the method label plus the pickup point and address so staff know
+   * where to deliver. The order snapshot (migration 0009) wins so history is
+   * stable; the live method row is the fallback for older orders.
+   */
+  function orderFulfilmentCell(o) {
+    var live = findDeliveryMethod(o.fulfilment) || {};
+    var label = o.fulfilment_label || live.label || fulfilmentLabel(o.fulfilment);
+    // Fall back to the sub-label (description) for rows created before 0009:
+    // that is where the branch name currently lives (e.g. The Urbana 1).
+    var point = o.pickup_point || live.pickup_point || live.description || "";
+    var address = o.pickup_address || live.pickup_address || "";
+    var mapUrl = safeHttpUrl(o.pickup_map_url || live.map_url || "");
+
+    var html = escapeHtml(label);
+    if (point && point !== label) {
+      html += '<br><span class="muted">自提点：' + escapeHtml(point) + "</span>";
+    }
+    if (address) {
+      html += '<br><span class="muted">' + escapeHtml(address) + "</span>";
+    }
+    if (mapUrl) {
+      html += '<br><a class="slip-link" href="' + escapeHtml(mapUrl) +
+        '" target="_blank" rel="noopener">地图</a>';
+    }
+    return html;
+  }
+
   function renderOrders() {
     if (!state.orders.length) {
       el.ordersBody.innerHTML = '<div class="empty">暂无订单</div>';
@@ -294,7 +324,7 @@
           '<td class="mono">' + escapeHtml(String(o.id).slice(0, 8)) + "</td>" +
           "<td>" + escapeHtml(o.wechat_name || "—") + "<br><span class=\"muted\">" + escapeHtml(o.phone || "") + "</span></td>" +
           "<td>" + (itemsText || '<span class="muted">—</span>') + "</td>" +
-          "<td>" + escapeHtml(fulfilmentLabel(o.fulfilment)) + "</td>" +
+          "<td>" + orderFulfilmentCell(o) + "</td>" +
           '<td class="mono">฿' + thb(o.total_satang) + "</td>" +
           "<td>" + slip + "</td>" +
           "<td>" + fmtDate(o.created_at) + "</td>" +
@@ -621,12 +651,25 @@
       var map = m.map_url
         ? '<a class="slip-link" href="' + escapeHtml(m.map_url) + '" target="_blank" rel="noopener">打开地图</a>'
         : '<span class="muted">—</span>';
+      // The pickup point is what staff actually need. Existing rows created
+      // before migration 0009 have an empty pickup_point, so fall back to the
+      // sub-label (description) — that is where the branch name currently
+      // lives, e.g. 自提 / The Urbana 1.
+      var point = m.pickup_point || m.description || "";
+      var pointCell = point
+        ? escapeHtml(point)
+        : '<span class="muted">未填写</span>';
+      var address = m.pickup_address
+        ? escapeHtml(m.pickup_address)
+        : '<span class="muted">—</span>';
       return (
         '<tr data-code="' + escapeHtml(m.code) + '">' +
           '<td class="mono">' + escapeHtml(m.code) + "</td>" +
           "<td>" + escapeHtml(m.label) +
             (m.description ? '<br><span class="muted">' + escapeHtml(m.description) + "</span>" : "") +
           "</td>" +
+          "<td>" + pointCell + "</td>" +
+          "<td>" + address + "</td>" +
           "<td>" + (m.time_window ? escapeHtml(m.time_window) : '<span class="muted">—</span>') + "</td>" +
           "<td>" + map + "</td>" +
           "<td>" + escapeHtml(m.sort_order) + "</td>" +
@@ -642,7 +685,7 @@
 
     el.deliveryBody.innerHTML =
       "<table><thead><tr>" +
-        "<th>代码</th><th>名称</th><th>取货时间</th><th>地图</th><th>排序</th><th>启用</th><th>操作</th>" +
+        "<th>代码</th><th>名称</th><th>自提点</th><th>地址</th><th>取货时间</th><th>地图</th><th>排序</th><th>启用</th><th>操作</th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table>";
 
     var edits = el.deliveryBody.querySelectorAll(".dm-edit");
@@ -670,6 +713,8 @@
     el.dmCode.value = m.code;
     el.dmLabel.value = m.label || "";
     el.dmDescription.value = m.description || "";
+    el.dmPickupPoint.value = m.pickup_point || "";
+    el.dmPickupAddress.value = m.pickup_address || "";
     el.dmTimeWindow.value = m.time_window || "";
     el.dmMapUrl.value = m.map_url || "";
     el.dmSort.value = m.sort_order;
@@ -719,6 +764,8 @@
     var body = {
       label: label,
       description: el.dmDescription.value.trim(),
+      pickup_point: el.dmPickupPoint.value.trim(),
+      pickup_address: el.dmPickupAddress.value.trim(),
       time_window: el.dmTimeWindow.value.trim(),
       map_url: el.dmMapUrl.value.trim()
     };
@@ -746,6 +793,8 @@
     el.dmCode.value = "";
     el.dmLabel.value = "";
     el.dmDescription.value = "";
+    el.dmPickupPoint.value = "";
+    el.dmPickupAddress.value = "";
     el.dmTimeWindow.value = "";
     el.dmMapUrl.value = "";
     el.dmSort.value = "";
@@ -1338,6 +1387,8 @@
     el.dmCode = $("dmCode");
     el.dmLabel = $("dmLabel");
     el.dmDescription = $("dmDescription");
+    el.dmPickupPoint = $("dmPickupPoint");
+    el.dmPickupAddress = $("dmPickupAddress");
     el.dmTimeWindow = $("dmTimeWindow");
     el.dmMapUrl = $("dmMapUrl");
     el.dmSort = $("dmSort");

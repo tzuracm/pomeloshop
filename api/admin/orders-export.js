@@ -63,18 +63,26 @@ async function exportOrders(req, res) {
 
   const orders = data || [];
 
-  // Resolve delivery-method labels from the live table so renamed/added
+  // Resolve delivery-method details from the live table so renamed/added
   // methods export with their current name. Codes missing from the table
   // (e.g. a deleted method on an old order) fall back to the built-in map.
+  //
+  // Each order also carries a snapshot of the method taken at order time
+  // (migration 0009). The snapshot wins so historical exports never change
+  // when a pickup point is renamed or removed; the live row is the fallback
+  // for orders created before the snapshot existed.
   const labels = { ...FULFILMENT_LABEL };
+  const methodsByCode = {};
   const { data: methods } = await admin
     .from("pomelo_delivery_methods")
-    .select("code, label");
+    .select("code, label, description, pickup_point, pickup_address, time_window");
   for (const m of methods || []) {
-    if (m.code && m.label) labels[m.code] = m.label;
+    if (!m.code) continue;
+    methodsByCode[m.code] = m;
+    if (m.label) labels[m.code] = m.label;
   }
 
-  const xlsx = buildWorkbook(orders, status, labels);
+  const xlsx = buildWorkbook(orders, status, labels, methodsByCode);
 
   const stamp = new Date().toISOString().slice(0, 10);
   const suffix = status ? "-" + status : "";
@@ -97,14 +105,38 @@ async function exportOrders(req, res) {
 // Workbook construction
 // ---------------------------------------------------------------------------
 
-/** Build the column definitions, closing over the resolved label map. */
-function buildColumns(labels) {
+/**
+ * Resolve the delivery-method fields for one order.
+ *
+ * Snapshot first (migration 0009), then the live method row, then the built-in
+ * label map. `point` falls back to the method's sub-label (`description`) —
+ * that is where the branch name lives on rows created before 0009, e.g.
+ * 自提 / The Urbana 1 — and finally to the label, so a pickup method never
+ * exports with an empty 自提点 cell.
+ */
+function resolveFulfilment(o, labels, methodsByCode) {
+  const live = (methodsByCode && methodsByCode[o.fulfilment]) || {};
+  const label =
+    o.fulfilment_label || live.label || labels[o.fulfilment] || o.fulfilment || "";
+  return {
+    label,
+    point: o.pickup_point || live.pickup_point || live.description || label,
+    address: o.pickup_address || live.pickup_address || "",
+    timeWindow: o.pickup_time_window || live.time_window || "",
+  };
+}
+
+/** Build the column definitions, closing over the resolved label maps. */
+function buildColumns(labels, methodsByCode) {
   return [
     { header: "订单号", width: 38, value: (o) => String(o.id || "") },
     { header: "下单时间", width: 20, value: (o) => fmtDateTime(o.created_at) },
     { header: "客户微信名", width: 18, value: (o) => o.wechat_name || "" },
     { header: "电话", width: 16, value: (o) => o.phone || "" },
-    { header: "交货方式", width: 16, value: (o) => labels[o.fulfilment] || o.fulfilment || "" },
+    { header: "交货方式", width: 16, value: (o) => resolveFulfilment(o, labels, methodsByCode).label },
+    { header: "自提点", width: 20, value: (o) => resolveFulfilment(o, labels, methodsByCode).point },
+    { header: "自提地址", width: 40, value: (o) => resolveFulfilment(o, labels, methodsByCode).address },
+    { header: "取货时间", width: 22, value: (o) => resolveFulfilment(o, labels, methodsByCode).timeWindow },
     { header: "商品明细", width: 40, value: (o) => itemsText(o.items) },
     { header: "总金额 (THB)", width: 14, numeric: true, value: (o) => (Number(o.total_satang) || 0) / 100 },
     { header: "状态", width: 12, value: (o) => STATUS_LABEL[o.status] || o.status || "" },
@@ -137,9 +169,12 @@ function fmtDateTime(iso) {
   );
 }
 
-function buildWorkbook(orders, statusFilter, labels) {
+function buildWorkbook(orders, statusFilter, labels, methodsByCode) {
   const sheetName = statusFilter ? `订单-${statusFilter}` : "订单";
-  const sheetXml = buildSheetXml(orders, buildColumns(labels || FULFILMENT_LABEL));
+  const sheetXml = buildSheetXml(
+    orders,
+    buildColumns(labels || FULFILMENT_LABEL, methodsByCode || {})
+  );
   const files = {
     "[Content_Types].xml": contentTypesXml(),
     "_rels/.rels": rootRelsXml(),

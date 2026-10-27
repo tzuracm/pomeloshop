@@ -6,13 +6,16 @@
  *   PATCH  — update a method (admin/owner)
  *   DELETE — remove a method (admin/owner)
  *
- * A delivery method is what the storefront shows under 交货方式:
- *   label        display name (e.g. 自提)
- *   description  optional sub-label (e.g. Self-Pickup)
- *   map_url      optional Google Maps link for the pickup point
- *   time_window  optional pickup time window (free text)
- *   sort_order   display order
- *   active       hidden methods are not offered to buyers
+ * A delivery method is what the storefront shows under 交货方式. Each row is
+ * also one pickup point (the buyer picks exactly one):
+ *   label          display name (e.g. 自提)
+ *   description    optional sub-label (e.g. Self-Pickup)
+ *   pickup_point   pickup-point name for staff / Excel (e.g. 拉差达店)
+ *   pickup_address full pickup address for staff / Excel
+ *   map_url        optional Google Maps link for the pickup point
+ *   time_window    optional pickup time window (free text)
+ *   sort_order     display order
+ *   active         hidden methods are not offered to buyers
  *
  * `code` is a stable identifier stored on pomelo_orders.fulfilment. It is
  * generated from the label on create and is immutable afterwards so historical
@@ -23,6 +26,8 @@ import { requireRole, withErrors, sendJson, readBody, HttpError } from "./_auth.
 
 const MAX_LABEL = 60;
 const MAX_DESCRIPTION = 120;
+const MAX_PICKUP_POINT = 80;
+const MAX_PICKUP_ADDRESS = 240;
 const MAX_URL = 500;
 const MAX_TIME_WINDOW = 120;
 
@@ -92,6 +97,18 @@ function normalise(body, { requireLabel }) {
     const d = String(body.description == null ? "" : body.description).trim();
     if (d.length > MAX_DESCRIPTION) throw new HttpError(400, "description is too long.");
     out.description = d;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "pickup_point")) {
+    const p = String(body.pickup_point == null ? "" : body.pickup_point).trim();
+    if (p.length > MAX_PICKUP_POINT) throw new HttpError(400, "pickup_point is too long.");
+    out.pickup_point = p;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "pickup_address")) {
+    const a = String(body.pickup_address == null ? "" : body.pickup_address).trim();
+    if (a.length > MAX_PICKUP_ADDRESS) throw new HttpError(400, "pickup_address is too long.");
+    out.pickup_address = a;
   }
 
   if (Object.prototype.hasOwnProperty.call(body, "map_url")) {
