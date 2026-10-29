@@ -723,31 +723,35 @@
 
   /** Build one message: { icon, html }. */
   function spNextMessage() {
-    var roll = Math.random();
+    // Only the "browsing now" message is enabled. The other message types
+    // ("someone just ordered" / "sold today") are kept for reference but
+    // commented out on purpose.
+    //
+    // var roll = Math.random();
+    //
+    // // ~45%: someone just ordered
+    // if (roll < 0.45) {
+    //   var mins = spRandomInt(1, 12);
+    //   var qty = spRandomInt(1, 3);
+    //   return {
+    //     icon: "🛒",
+    //     html: "<strong>" + mins + " 分钟前</strong>有人下单了 " +
+    //           escapeHtml(spRandomSkuLabel()) + " × " + qty
+    //   };
+    // }
+    //
+    // // ~25%: sold today
+    // if (roll >= 0.75) {
+    //   return {
+    //     icon: "🍊",
+    //     html: "今天已售出 <strong>" + sp.ordersToday + " 份</strong>"
+    //   };
+    // }
 
-    // ~45%: someone just ordered
-    if (roll < 0.45) {
-      var mins = spRandomInt(1, 12);
-      var qty = spRandomInt(1, 3);
-      return {
-        icon: "🛒",
-        html: "<strong>" + mins + " 分钟前</strong>有人下单了 " +
-              escapeHtml(spRandomSkuLabel()) + " × " + qty
-      };
-    }
-
-    // ~30%: browsing now
-    if (roll < 0.75) {
-      return {
-        icon: "👀",
-        html: "约 <strong>" + sp.viewers + " 人</strong>正在浏览"
-      };
-    }
-
-    // ~25%: sold today
+    // Always: browsing now
     return {
-      icon: "🍊",
-      html: "今天已售出 <strong>" + sp.ordersToday + " 份</strong>"
+      icon: "👀",
+      html: "约 <strong>" + sp.viewers + " 人</strong>正在浏览"
     };
   }
 
@@ -802,17 +806,19 @@
     if (sp.stopped) return;
 
     // Seed the simulated counters from owner-editable config.
-    var baseOrders = spReadNumber(content, "social_proof_orders_base", 120);
+    // Only the viewer count is used now; the "sold today" counters are kept
+    // for reference but commented out.
+    // var baseOrders = spReadNumber(content, "social_proof_orders_base", 120);
     var vMin = spReadNumber(content, "social_proof_viewers_min", 8);
     var vMax = spReadNumber(content, "social_proof_viewers_max", 24);
     if (vMax < vMin) vMax = vMin;
 
     // Daily cap: the "sold today" figure never exceeds this. 0 = no cap.
-    var dailyMax = spReadNumber(content, "social_proof_orders_daily_max", 0);
-    sp.ordersToday = baseOrders + spRandomInt(0, 9);
-    if (dailyMax > 0) {
-      sp.ordersToday = Math.min(sp.ordersToday, dailyMax);
-    }
+    // var dailyMax = spReadNumber(content, "social_proof_orders_daily_max", 0);
+    // sp.ordersToday = baseOrders + spRandomInt(0, 9);
+    // if (dailyMax > 0) {
+    //   sp.ordersToday = Math.min(sp.ordersToday, dailyMax);
+    // }
     sp.viewers = spRandomInt(vMin, vMax);
 
     // Nudge the browsing count a little over time so it feels alive.
