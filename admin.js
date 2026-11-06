@@ -41,6 +41,9 @@
     content: {},
     settings: {},
     users: [],
+    // Sales rounds (derived from the catalogue's overall state, read-only)
+    rounds: [],
+    currentRoundId: null,
     // Payment QR upload flow
     qrFile: null,
     qrDecoded: null
@@ -216,7 +219,7 @@
     }
 
     // Lazy-load the panel's data on first view.
-    if (name === "orders") loadOrders();
+    if (name === "orders") loadOrderFilters();
     else if (name === "catalogue") loadCatalogue();
     else if (name === "delivery") loadDeliveryMethods();
     else if (name === "payment") loadPaymentQr();
@@ -228,10 +231,130 @@
   // Orders
   // --------------------------------------------------------------------------
 
+  /**
+   * Load the round list, then the orders.
+   *
+   * The default view is the currently open round. When no round is open (every
+   * product is off sale) it falls back to the newest round; with no rounds at
+   * all it falls back to "all orders".
+   */
+  function loadOrderFilters() {
+    return loadRounds()
+      .catch(function () {
+        // A rounds failure must not block the order list.
+        state.rounds = [];
+        state.currentRoundId = null;
+      })
+      .then(function () {
+        applyDefaultRound();
+        return loadOrders();
+      });
+  }
+
+  function loadRounds() {
+    return api("/api/admin/rounds").then(function (data) {
+      state.rounds = data.rounds || [];
+      state.currentRoundId = data.currentRoundId || null;
+      renderRoundFilter();
+    });
+  }
+
+  /** Fill the round dropdown: current round, older rounds, unassigned, all. */
+  function renderRoundFilter() {
+    if (!el.orderRoundFilter) return;
+
+    var previous = el.orderRoundFilter.value;
+    var html = "";
+
+    if (state.rounds.length) {
+      var current = null;
+      for (var i = 0; i < state.rounds.length; i++) {
+        if (state.rounds[i].id === state.currentRoundId) { current = state.rounds[i]; break; }
+      }
+      if (current) {
+        html += '<option value="' + escapeHtml(current.id) + '">当前轮次（第 ' +
+          current.roundNumber + " 轮）</option>";
+      }
+      for (var j = 0; j < state.rounds.length; j++) {
+        var r = state.rounds[j];
+        if (r.id === state.currentRoundId) continue;
+        html += '<option value="' + escapeHtml(r.id) + '">第 ' + r.roundNumber + " 轮 · " +
+          escapeHtml(roundRange(r)) + (r.isOpen ? "（开放中）" : "") + "</option>";
+      }
+    }
+
+    html += '<option value="unassigned">未归档（历史订单）</option>';
+    html += '<option value="all">全部订单</option>';
+
+    el.orderRoundFilter.innerHTML = html;
+
+    // Keep the user's choice when it still exists, otherwise re-apply default.
+    var keep = false;
+    for (var k = 0; k < el.orderRoundFilter.options.length; k++) {
+      if (el.orderRoundFilter.options[k].value === previous) { keep = true; break; }
+    }
+    if (keep) el.orderRoundFilter.value = previous;
+  }
+
+  /** "MM-DD ~ MM-DD" for a round, in Bangkok time. */
+  function roundRange(r) {
+    var from = fmtDay(r.startedAt);
+    var to = r.endedAt ? fmtDay(r.endedAt) : "至今";
+    return from + " ~ " + to;
+  }
+
+  function fmtDay(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    var t = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+    var p = function (n) { return String(n).padStart(2, "0"); };
+    return p(t.getUTCMonth() + 1) + "-" + p(t.getUTCDate());
+  }
+
+  /**
+   * "-round3" for a specific round, "" for "all" / "unassigned" / unknown.
+   * Mirrors the server-side filename suffix in orders-export.js.
+   */
+  function roundNumberSuffix(round) {
+    if (!round || round === "all" || round === "unassigned") return "";
+    for (var i = 0; i < state.rounds.length; i++) {
+      if (state.rounds[i].id === round) return "-round" + state.rounds[i].roundNumber;
+    }
+    return "";
+  }
+
+  /**
+   * Select the default round: the open one, else the newest, else "all".
+   * Only applied when the current selection is not a valid round anymore.
+   */
+  function applyDefaultRound() {
+    if (!el.orderRoundFilter) return;
+
+    var value = el.orderRoundFilter.value;
+    var valid = false;
+    for (var i = 0; i < el.orderRoundFilter.options.length; i++) {
+      if (el.orderRoundFilter.options[i].value === value) { valid = true; break; }
+    }
+    if (valid && value !== "all") return;
+
+    if (state.currentRoundId) {
+      el.orderRoundFilter.value = state.currentRoundId;
+    } else if (state.rounds.length) {
+      el.orderRoundFilter.value = state.rounds[0].id;   // newest first
+    } else {
+      el.orderRoundFilter.value = "all";
+    }
+  }
+
   function loadOrders() {
     el.ordersBody.innerHTML = '<div class="empty">加载中…</div>';
     var status = el.orderStatusFilter.value;
-    var qs = status ? ("?status=" + encodeURIComponent(status)) : "";
+    var round = el.orderRoundFilter ? el.orderRoundFilter.value : "";
+    var qs = "";
+    if (status) qs += "&status=" + encodeURIComponent(status);
+    if (round) qs += "&round=" + encodeURIComponent(round);
+    qs = qs ? "?" + qs.slice(1) : "";
 
     // Load the delivery-method labels alongside the orders so the table shows
     // "自提" rather than the raw code. A failure here must not block orders.
@@ -365,8 +488,10 @@
    */
   function exportOrders(mode) {
     var status = el.orderStatusFilter.value;
+    var round = el.orderRoundFilter ? el.orderRoundFilter.value : "";
     var qs = "?mode=" + encodeURIComponent(mode);
     if (status) qs += "&status=" + encodeURIComponent(status);
+    if (round) qs += "&round=" + encodeURIComponent(round);
 
     var btn = mode === "download" ? el.exportDownload : el.exportOpen;
     var original = btn.textContent;
@@ -396,7 +521,9 @@
       })
       .then(function (blob) {
         var stamp = new Date().toISOString().slice(0, 10);
-        var filename = "pomelo-orders" + (status ? "-" + status : "") + "-" + stamp + ".xlsx";
+        var roundSuffix = roundNumberSuffix(round);
+        var filename = "pomelo-orders" + roundSuffix +
+          (status ? "-" + status : "") + "-" + stamp + ".xlsx";
         var url = URL.createObjectURL(blob);
 
         if (mode === "download") {
@@ -542,6 +669,7 @@
         btn.disabled = false;
         showAlert("ok", next ? "商品已上架，买家端可见。" : "商品已下架，买家端不再显示。");
         loadCatalogue();
+        refreshRoundsAfterCatalogueChange();
       })
       .catch(function (err) {
         btn.disabled = false;
@@ -577,6 +705,7 @@
       .then(function () {
         showAlert("ok", "商品已删除。");
         loadCatalogue();
+        refreshRoundsAfterCatalogueChange();
       })
       .catch(fail);
   }
@@ -606,10 +735,31 @@
         var created = data && data.item && data.item.sku ? "（SKU: " + data.item.sku + "）" : "";
         showAlert("ok", mode === "POST" ? "商品已创建" + created + "。" : "商品已更新。");
         loadCatalogue();
+        refreshRoundsAfterCatalogueChange();
       })
       .catch(function (err) {
         el.catSave.disabled = false;
         fail(err);
+      });
+  }
+
+  /**
+   * The database derives rounds from the catalogue, so a product change may
+   * have opened or closed a round. Re-read the round list and tell the admin
+   * when the current round changed. No server-side logic is involved here.
+   */
+  function refreshRoundsAfterCatalogueChange() {
+    var before = state.currentRoundId;
+    loadRounds()
+      .then(function () {
+        if (before && state.currentRoundId && before !== state.currentRoundId) {
+          showAlert("ok", "新一轮销售已开始。");
+        } else if (before && !state.currentRoundId) {
+          showAlert("ok", "本轮销售已结束（所有商品已下架）。");
+        }
+      })
+      .catch(function () {
+        // Non-critical: the round list refreshes on the next orders visit.
       });
   }
 
@@ -1371,6 +1521,7 @@
 
     el.panelCatalogue = $("panel-catalogue");
 
+    el.orderRoundFilter = $("orderRoundFilter");
     el.orderStatusFilter = $("orderStatusFilter");
     el.refreshOrders = $("refreshOrders");
     el.exportOpen = $("exportOpen");
@@ -1449,6 +1600,7 @@
 
     el.refreshOrders.addEventListener("click", loadOrders);
     el.orderStatusFilter.addEventListener("change", loadOrders);
+    if (el.orderRoundFilter) el.orderRoundFilter.addEventListener("change", loadOrders);
     el.exportOpen.addEventListener("click", function () { exportOrders("inline"); });
     el.exportDownload.addEventListener("click", function () { exportOrders("download"); });
 

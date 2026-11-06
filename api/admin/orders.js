@@ -2,6 +2,8 @@
  * Vercel serverless function: /api/admin/orders
  *
  *   GET   — list orders (any staff role: user/admin/owner)
+ *             ?status=  optional — pending|paid|delivered|cancelled
+ *             ?round=   optional — <uuid> | "unassigned" | "all" (default)
  *   PATCH — update an order
  *             • user  : may change ONLY `status` and `note`
  *             • admin : may change any field
@@ -9,11 +11,30 @@
  *
  * The caller's role is verified server-side by requireRole(); the client is
  * never trusted to declare its own role.
+ *
+ * `sales_round_id` is deliberately absent from both editable whitelists: order
+ * attribution is written once by the database trigger and is immutable.
  */
 
 import { requireRole, withErrors, sendJson, readBody, HttpError } from "./_auth.js";
 
 const ORDER_STATUSES = ["pending", "paid", "delivered", "cancelled"];
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Apply the `round` filter to a PostgREST query.
+ *
+ *   absent / "all" → no filter (backwards compatible)
+ *   "unassigned"   → sales_round_id is null (historical orders)
+ *   <uuid>         → that round only
+ */
+function applyRound(query, raw) {
+  if (raw === undefined || raw === null || raw === "" || raw === "all") return query;
+  if (raw === "unassigned") return query.is("sales_round_id", null);
+  if (!UUID_RE.test(String(raw))) throw new HttpError(400, "Invalid round id.");
+  return query.eq("sales_round_id", String(raw));
+}
 
 /** Fields a plain `user` is allowed to change. */
 const USER_EDITABLE = ["status", "note"];
@@ -43,6 +64,8 @@ async function listOrders(req, res) {
   if (status && ORDER_STATUSES.includes(status)) {
     query = query.eq("status", status);
   }
+
+  query = applyRound(query, req.query.round);
 
   const { data, error } = await query;
   if (error) throw new HttpError(500, "Failed to load orders: " + error.message);

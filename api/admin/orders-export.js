@@ -5,10 +5,20 @@
  *
  * Query params:
  *   status  optional — one of pending|paid|delivered|cancelled
+ *   round   optional — <uuid> | "unassigned" | "all" (default)
  *   limit   optional — max rows (default 5000, capped at 20000)
  *   mode    optional — "inline" (default, opens in the browser) or "download"
  *
  * Auth: any staff role (user/admin/owner), verified server-side by requireRole().
+ *
+ * Every export returns ALL orders currently matching the filter. Nothing is
+ * remembered between exports: an order exported yesterday is exported again
+ * today, and orders created since the last export are included. There is no
+ * export log, snapshot or history table.
+ *
+ * Rows are fetched with `.range()` pagination because PostgREST caps a single
+ * response at `db-max-rows` (1000 by default) — a plain `.limit(20000)` would
+ * silently truncate.
  *
  * The .xlsx is built by hand (SpreadsheetML + a minimal ZIP writer) so the
  * project needs no extra dependency. The output opens natively in Excel,
@@ -18,6 +28,11 @@
 import { requireRole, withErrors, HttpError } from "./_auth.js";
 
 const ORDER_STATUSES = ["pending", "paid", "delivered", "cancelled"];
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** PostgREST `db-max-rows` default — the largest page a single request returns. */
+const PAGE_SIZE = 1000;
 
 const STATUS_LABEL = {
   pending: "待付款",
@@ -45,23 +60,16 @@ async function exportOrders(req, res) {
   const { admin } = await requireRole(req, "user");
 
   const status = req.query.status;
+  const round = req.query.round;
   const limit = Math.min(parseInt(req.query.limit, 10) || 5000, 20000);
   const mode = req.query.mode === "download" ? "download" : "inline";
 
-  let query = admin
-    .from("pomelo_orders")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  const orders = await fetchAllOrders(admin, status, round, limit);
 
-  if (status && ORDER_STATUSES.includes(status)) {
-    query = query.eq("status", status);
-  }
-
-  const { data, error } = await query;
-  if (error) throw new HttpError(500, "Failed to load orders: " + error.message);
-
-  const orders = data || [];
+  // Round label for the sheet name / filename. Derived from the same ordering
+  // the rounds endpoint uses (started_at asc, id asc), so the numbers always
+  // agree with the admin dropdown.
+  const roundLabel = await resolveRoundLabel(admin, round);
 
   // Resolve delivery-method details from the live table so renamed/added
   // methods export with their current name. Codes missing from the table
@@ -82,11 +90,12 @@ async function exportOrders(req, res) {
     if (m.label) labels[m.code] = m.label;
   }
 
-  const xlsx = buildWorkbook(orders, status, labels, methodsByCode);
+  const xlsx = buildWorkbook(orders, status, labels, methodsByCode, roundLabel);
 
   const stamp = new Date().toISOString().slice(0, 10);
   const suffix = status ? "-" + status : "";
-  const filename = `pomelo-orders${suffix}-${stamp}.xlsx`;
+  const roundSuffix = roundLabel ? "-" + roundLabel.file : "";
+  const filename = `pomelo-orders${roundSuffix}${suffix}-${stamp}.xlsx`;
 
   res.setHeader(
     "Content-Type",
@@ -99,6 +108,81 @@ async function exportOrders(req, res) {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Length", String(xlsx.length));
   res.status(200).send(Buffer.from(xlsx));
+}
+
+// ---------------------------------------------------------------------------
+// Query helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply the `round` filter to a PostgREST query.
+ *
+ *   absent / "all" → no filter
+ *   "unassigned"   → sales_round_id is null (historical orders)
+ *   <uuid>         → that round only
+ */
+function applyRound(query, raw) {
+  if (raw === undefined || raw === null || raw === "" || raw === "all") return query;
+  if (raw === "unassigned") return query.is("sales_round_id", null);
+  if (!UUID_RE.test(String(raw))) throw new HttpError(400, "Invalid round id.");
+  return query.eq("sales_round_id", String(raw));
+}
+
+/**
+ * Fetch every order matching the filters, page by page.
+ *
+ * `.limit(20000)` alone cannot exceed PostgREST's `db-max-rows` (1000), so the
+ * extra rows would be dropped without an error. Paging with `.range()` and a
+ * unique ORDER BY tiebreaker (`id`) returns the complete set, with no
+ * duplicates and no gaps.
+ */
+async function fetchAllOrders(admin, status, round, cap) {
+  const out = [];
+  for (let from = 0; from < cap; from += PAGE_SIZE) {
+    let q = admin
+      .from("pomelo_orders")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (status && ORDER_STATUSES.includes(status)) q = q.eq("status", status);
+    q = applyRound(q, round);
+
+    const { data, error } = await q;
+    if (error) throw new HttpError(500, "Failed to load orders: " + error.message);
+
+    out.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return out;
+}
+
+/**
+ * Resolve the round label used in the sheet name and the filename.
+ *
+ * Returns `null` when no round filter is applied (or for "unassigned"), so the
+ * workbook keeps its existing generic naming. Round numbers are derived from
+ * `started_at asc, id asc` — the same ordering as /api/admin/rounds — and are
+ * never stored.
+ */
+async function resolveRoundLabel(admin, round) {
+  if (!round || round === "all" || round === "unassigned") return null;
+
+  const { data, error } = await admin
+    .from("pomelo_sales_rounds")
+    .select("id, started_at")
+    .order("started_at", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (error) throw new HttpError(500, "Failed to load sales rounds: " + error.message);
+
+  const rows = data || [];
+  const index = rows.findIndex((r) => r.id === round);
+  if (index < 0) throw new HttpError(404, "Sales round not found.");
+
+  const n = index + 1;
+  return { n, sheet: `第${n}轮`, file: `round${n}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -169,8 +253,12 @@ function fmtDateTime(iso) {
   );
 }
 
-function buildWorkbook(orders, statusFilter, labels, methodsByCode) {
-  const sheetName = statusFilter ? `订单-${statusFilter}` : "订单";
+function buildWorkbook(orders, statusFilter, labels, methodsByCode, roundLabel) {
+  // Round is conveyed by the sheet name only — the 13 columns stay untouched.
+  const parts = ["订单"];
+  if (roundLabel) parts.push(roundLabel.sheet);
+  if (statusFilter) parts.push(statusFilter);
+  const sheetName = parts.join("-");
   const sheetXml = buildSheetXml(
     orders,
     buildColumns(labels || FULFILMENT_LABEL, methodsByCode || {})

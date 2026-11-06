@@ -47,6 +47,8 @@ Open your Supabase project → **SQL Editor** → run the migrations **in order*
 6. [`supabase/migrations/0006_pomelo_forced_password_change.sql`](supabase/migrations/0006_pomelo_forced_password_change.sql)
 7. [`supabase/migrations/0007_pomelo_payment_qr_only.sql`](supabase/migrations/0007_pomelo_payment_qr_only.sql)
 8. [`supabase/migrations/0008_pomelo_settings_admin_write.sql`](supabase/migrations/0008_pomelo_settings_admin_write.sql)
+9. [`supabase/migrations/0009_pomelo_pickup_points.sql`](supabase/migrations/0009_pomelo_pickup_points.sql)
+10. [`supabase/migrations/0010_pomelo_sales_rounds.sql`](supabase/migrations/0010_pomelo_sales_rounds.sql)
 
 Migration `0001` creates:
 
@@ -72,6 +74,15 @@ narrows anonymous reads to `promptpay_qr_payload` only. Migration `0008` widens
 write access to that table from owner-only to `admin` + `owner`, so payment
 configuration is an operational duty rather than an ownership decision. See
 [`plans/payment-settings-consolidation.md`](plans/payment-settings-consolidation.md).
+
+Migration `0010` adds **sales rounds**. A round is open while at least one
+catalogue item is active; it closes when the last item is taken down, and a new
+round opens the next time any item comes back. There is no manual rotate/open/
+close action — database triggers on `pomelo_catalogue` maintain the state, and a
+`BEFORE INSERT` trigger on `pomelo_orders` assigns every new order to the current
+round (rejecting the insert when nothing is on sale). Historical orders keep
+`sales_round_id = NULL` and are shown as 未归档. See
+[`plans/sales-rounds.md`](plans/sales-rounds.md).
 
 ### 2.2 Configure environment variables
 
